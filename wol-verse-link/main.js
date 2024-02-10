@@ -24,7 +24,7 @@ class Verse extends obsidian.MarkdownRenderChild {
     let raw = this.containerEl.innerHTML;
     let result = raw;
     while ( ( match = Link.Regex.exec( raw ) ) !== null ) {
-      console.log( match );
+      // console.log( match );
       let book = ( match[1] ?? "" ) + match[2]; // add the book ordinal if it exists
       // Use a "Starting with" search only, to avoid match inside book names, e.g. eph in zepheniah
       let book_match = Bible.Abbreviation.find( elem => elem.search( " " + book.toLowerCase() ) !== -1 );
@@ -34,7 +34,7 @@ class Verse extends obsidian.MarkdownRenderChild {
           let verse_no = match[4]
           // Rebuild a full canonical bible verse reference
           let display = Bible.Book[ book_no - 1 ] + ' ' + chp_no + ':' + verse_no;
-          let href = `${URL.Prefix}${book_no}/${chp_no}${URL.Args}${book_no}:${chp_no}:${verse_no}`;
+          let href = `${Link.Prefix}${book_no}/${chp_no}${Link.Args}${book_no}:${chp_no}:${verse_no}`;
           let verse_url = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
           result = result.replace( match[0], verse_url );
       }
