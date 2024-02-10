@@ -1,3 +1,11 @@
+/*
+Obsidian PLugin
+===============
+Looks for valid NWT bible verse references in the markdown text 
+and and automatically converts them to valid wol.jw.org bible hyperlinks.  
+Visible in the HTML View mode only.
+*/
+
 var obsidian = require('obsidian');
 
 class WOLVerse extends obsidian.Plugin {
@@ -34,7 +42,7 @@ class Verse extends obsidian.MarkdownRenderChild {
           let verse_no = match[4]
           // Rebuild a full canonical bible verse reference
           let display = Bible.Book[ book_no - 1 ] + ' ' + chp_no + ':' + verse_no;
-          let href = `${Link.Prefix}${book_no}/${chp_no}${Link.Args}${book_no}:${chp_no}:${verse_no}`;
+          let href = `${Link.Prefix}${book_no}/${chp_no}${Link.Study}${Link.Verse}${book_no}:${chp_no}:${verse_no}`;
           let verse_url = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
           result = result.replace( match[0], verse_url );
       }
@@ -46,7 +54,8 @@ class Verse extends obsidian.MarkdownRenderChild {
 const Link = {
   // Format: E.g. Gen 1:6 => https://wol.jw.org/en/wol/b/r1/lp-e/nwtsty/1/1#study=discover&v=1:1:6
   Prefix: "https://wol.jw.org/en/wol/b/r1/lp-e/nwtsty/",
-  Args: "#study=discover&v=",
+  Study: "#study=discover",
+  Verse: "&v=",
   // 0 = original, 1 = book no. (could be undefined), 2 = book name, 3 = chapter, 4 = verse
   Regex: /([123])?(?:\s|&nbsp;)?([A-Z][a-zA-Z]+|Song of Solomon)\.?\s?(1?[0-9]?[0-9]):(\d{1,3}([,-]\s?\d{1,3})*)/gmi,
 }
