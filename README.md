@@ -10,6 +10,6 @@ Download the **jwlib-verse-link** folder above and drop it into your **{Obsidian
 To see it in action: open a page which contains bible verse references, e.g. Rom 1:20; Psalm 89:18; 1 Cor 9:26, etc... and switch to Reading view.  
 You should see that all verse references are now displayed as hyperlinks, and any abbreviated book names will be written out in full.  
 
-Click on a link to jump straight to open your installed JW Library app at that verse.
+Click on the link to open your installed JW Library app directly at that verse.
 
 *Note: This only affects the Reading view not the underlying markdown text!*
