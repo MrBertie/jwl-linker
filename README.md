@@ -1,4 +1,4 @@
-# JW Library Verse Plugin for the [Obsidian](https://obsidian.md) Notetaking App
+# JW Library Verse Link Plugin for [Obsidian](https://obsidian.md) Notetaking App
 
 Looks for valid NWT Bible verse references in the Markdown text and and automatically displays them as working local JW Library hyperlinks in the Reading View.
 
