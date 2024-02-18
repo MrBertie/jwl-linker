@@ -2,6 +2,8 @@
 
 Looks for valid NWT Bible verse references in the Markdown text and and automatically displays them as working local JW Library hyperlinks in the Reading View.
 
+![Logo](PluginLogo-small.png)
+
 
 # How to Use
 
