@@ -38,16 +38,17 @@ class Verse extends obsidian.MarkdownRenderChild {
       if ( book_match !== undefined ) {
           let book_no = Number( book_match.substring(0, 2) );
           let chp_no = match[3];
-          let verse_no = match[4]
+          let verse_no = match[4];
+          let verses = verse_no + ( match[5] ?? "" );
           // Rebuild a full canonical bible verse reference
-          let display = Bible.Book[ book_no - 1 ] + ' ' + chp_no + ':' + verse_no;
-          let verse_ref = book_no.padStart(2, "0") + chp_no.padStart(3, "0") + verse_no.padStart(3, "0");
+          let display = Bible.Book[ book_no - 1 ] + ' ' + chp_no + ':' + verses;
+          let verse_ref = book_no.toString().padStart(2, "0") + chp_no.padStart(3, "0") + verse_no.padStart(3, "0");
           let href = `${Link.Prefix}${verse_ref}`;
           let verse_url = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
           result = result.replace( match[0], verse_url );
+          this.containerEl.innerHTML = result;
       }
     };
-    this.containerEl.innerHTML = result;
   }
 }
 
@@ -55,7 +56,7 @@ const Link = {
   // Format: E.g. Gen 1:6 => https://wol.jw.org/en/wol/b/r1/lp-e/nwtsty/1/1#study=discover&v=1:1:6
   Prefix: "jwlibrary:///finder?bible=",
   // 0 = original, 1 = book no. (could be undefined), 2 = book name, 3 = chapter, 4 = verse
-  Regex: /([123])?(?:\s|&nbsp;)?([A-Z][a-zA-Z]+|Song of Solomon)\.?\s?(1?[0-9]?[0-9]):(\d{1,3}([,-]\s?\d{1,3})*)/gmi,
+  Regex: /([123])?(?:\s|&nbsp;)?([A-Z][a-zA-Z]+|Song of Solomon)\.?\s?(1?[0-9]?[0-9]):(\d{1,3})([,-]\s?\d{1,3})*/gmi,
 }
 
 const Bible = {
