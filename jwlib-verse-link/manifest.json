@@ -1,9 +1,9 @@
 {
 	"id": "jwlib-verse-link",
 	"name": "JW Library Verse Link",
-	"version": "0.0.0",
+	"version": "0.0.3",
 	"minAppVersion": "0.15.0",
-	"description": "Looks for valid NWT bible verse references in the markdown text and and automatically converts them to valid JW Library bible hyperlinks.  Visible in the HTML View mode only.",
+	"description": "This plugin looks for valid NWT Bible verse references in the Markdown text and and then automatically displays them in the Reading View as hyperlinks to your local JW Library App.",
 	"author": "MrBertie",
 	"authorUrl": "https://github.com/MrBertie/jwlib-verse-link",
 	"fundingUrl": "https://github.com/MrBertie/jwlib-verse-link",

@@ -1,8 +1,8 @@
 /*
 JW Library Verse Link - Obsidian Plugin
 ===============
-Looks for valid NWT Bible verse references in the Markdown text and
-automatically displays them as working local JW Library hyperlinks in the Reading View.
+This plugin looks for valid NWT Bible verse references in the Markdown text and and 
+then automatically displays them in the Reading View as hyperlinks to your local JW Library.
 */
 
 var obsidian = require('obsidian');
@@ -30,33 +30,43 @@ class Verse extends obsidian.MarkdownRenderChild {
     let match;
     let raw = this.containerEl.innerHTML;
     let result = raw;
-    while ( ( match = Link.Regex.exec( raw ) ) !== null ) {
+    while ( ( match = Config.Regex.exec( raw ) ) !== null ) {
       // console.log( match );
-      let book = ( match[1] ?? "" ) + match[2]; // add the book ordinal if it exists
+      let book = ( match[M.Ordinal] ?? "" ) + match[M.Book]; // add the book ordinal if it exists
       // Use a "Starting with" search only, to avoid match inside book names, e.g. eph in zepheniah
       let book_match = Bible.Abbreviation.find( elem => elem.search( " " + book.toLowerCase() ) !== -1 );
       if ( book_match !== undefined ) {
           let book_no = Number( book_match.substring(0, 2) );
-          let chp_no = match[3];
-          let verse_no = match[4];
-          let verses = verse_no + ( match[5] ?? "" );
+          let chp_no = match[M.Chapter];
+          let verse_no = match[M.Verse];
+          let verses = verse_no + ( match[M.Verses] ?? "" );
           // Rebuild a full canonical bible verse reference
           let display = Bible.Book[ book_no - 1 ] + ' ' + chp_no + ':' + verses;
+           // Format: 01001006 = Book 01 Chapter 002 Verse 006 = Genesis 2:6
           let verse_ref = book_no.toString().padStart(2, "0") + chp_no.padStart(3, "0") + verse_no.padStart(3, "0");
-          let href = `${Link.Prefix}${verse_ref}`;
+          let href = `${Config.Prefix}${verse_ref}`;
           let verse_url = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
-          result = result.replace( match[0], verse_url );
+          result = result.replace( match[M.Full], verse_url );
           this.containerEl.innerHTML = result;
       }
     };
   }
 }
 
-const Link = {
-  // Format: E.g. Gen 1:6 => https://wol.jw.org/en/wol/b/r1/lp-e/nwtsty/1/1#study=discover&v=1:1:6
+const Config = {
   Prefix: "jwlibrary:///finder?bible=",
-  // 0 = original, 1 = book no. (could be undefined), 2 = book name, 3 = chapter, 4 = verse
-  Regex: /([123])?(?:\s|&nbsp;)?([A-Z][a-zA-Z]+|Song of Solomon)\.?\s?(1?[0-9]?[0-9]):(\d{1,3})([,-]\s?\d{1,3})*/gmi,
+  // 0 = full match, 1 = book no. (undefined??), 2 = book name, 3 = chapter, 4 = verse, 5 = addition verses (undefined??)
+  Regex: /\b([123](?: |&nbsp;)?)?(\w{2,}|song of solomon) (\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?\b/gmi,
+}
+
+// All the matches
+const M = {
+  Full: 0,
+  Ordinal: 1, // undefined ??
+  Book: 2,
+  Chapter: 3,
+  Verse: 4,
+  Verses: 5,  // undefined ??
 }
 
 const Bible = {
