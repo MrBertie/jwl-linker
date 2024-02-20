@@ -2,7 +2,7 @@
 
 This plugin looks for valid NWT Bible verse references in the Markdown text and and then automatically displays them in the Reading View as hyperlinks to your local JW Library.
 
-![Logo](PluginLogo-small.png)
+![Logo](logo.png)
 
 
 # How to Use
