@@ -16,4 +16,4 @@ You should see that all verse references are now displayed as hyperlinks, in add
 Click on the link to open your installed JW Library app directly at that verse.
 
 # Notes
-This only affects the Reading view not the underlying Markdown text!*
+*This only affects the Reading view not the underlying Markdown text!*
