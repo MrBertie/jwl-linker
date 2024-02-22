@@ -4,10 +4,11 @@ This plugin looks for valid NWT Bible verse references in the Markdown text and 
 
 ![Logo](logo.png)
 
-
-# How to Use
+# How to Install
 
 Download the **jwlib-verse-link** folder above and drop it into your **{Obsidian Vault}/.obsidian/plugins** folder, then restart Obsidian.  You will need to go to the Plugin Settings page in Obsidian and enable the plugin.
+
+# How to Use
 
 To see it in action: open a page which contains bible verse references, e.g. Rom 1:20; Psalm 89:18; 1 Cor 9:26, etc... and then switch to Reading view.  
 You should see that all verse references are now displayed as hyperlinks, in addition any abbreviated book names will be written out in full.  
