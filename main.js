@@ -60,7 +60,7 @@ class Verse extends obsidian.MarkdownRenderChild {
   }
 
   onload() {
-    ({result, changed} = addVerseLinks(this.containerEl.innerHTML, false, eType.URL));
+    let {result, changed} = addVerseLinks(this.containerEl.innerHTML, false, eType.URL);
     if (changed) {
       this.containerEl.innerHTML = result;
     }
@@ -118,7 +118,7 @@ const addVerseLinks = (input, changed, type) => {
     if (match[M.IsLink] === undefined) {
       let book = (match[M.Ordinal] ?? "") + match[M.Book]; // add the book ordinal if it exists
 
-      // Use a "Starting with" search only, to avoid match inside book names, e.g. eph in zepheniah
+      // Use a "Starting with" search only, to avoid matching inside book names, e.g. eph in zepheniah
       let book_match = Bible.Abbreviation.find( elem => elem.search(" " + book.toLowerCase()) !== -1);
       if (book_match !== undefined) {
         let book_no = Number(book_match.substring(0, 2));
@@ -146,13 +146,13 @@ const addVerseLinks = (input, changed, type) => {
 }
 
 /**
- * Replaces all Web Finder links in input text with JW Library Finder links
+ * Replaces all JW Web Finder links in input text with JW Library Finder links
  * 
  * @param {string} input
  * @param {boolean} changed
  * @return {string, boolean}
  */
-const swapFinderLinks = (input) => {
+const swapFinderLinks = (input, changed) => {
   let result = input
   if (input.includes(Config.WebFinder)) {
     result = input.replace(Config.WebFinder, Config.JWLFinder);
