@@ -1,0 +1,11 @@
+{
+	"id"           : "jwlib-linker",
+	"name"         : "JWLib Linker",
+	"version"      : "0.1.0",
+	"minAppVersion": "0.15.0",
+	"description"  : "Reading View: Show bible references as JW Library links. Editing View: Adds Command to convert bible references and jw.org 'finder' links to JW Library links.",
+	"author"       : "MrBertie",
+	"authorUrl"    : "https://github.com/MrBertie/jwlib-verse-link",
+	"fundingUrl"   : "https://github.com/MrBertie/jwlib-verse-link",
+	"isDesktopOnly": false
+}
