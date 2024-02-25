@@ -8,7 +8,7 @@
 
 # How to Install
 
-Download the latest **jwlib-linker** release, unzip it, and drop the folder into your **{Obsidian Vault}/.obsidian/plugins** folder, and restart Obsidian.  
+Download the latest **jwlib-linker** [release](https://github.com/MrBertie/jwlib-linker/releases), unzip it, and drop the folder into your **{Obsidian Vault}/.obsidian/plugins** folder, and restart Obsidian.  
 You will need to go to the Plugin Settings page in Obsidian and enable the plugin.
 
 # How to Use
