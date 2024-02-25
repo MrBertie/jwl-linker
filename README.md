@@ -1,7 +1,8 @@
 # JWLib Linker Plugin for [Obsidian](https://obsidian.md)
 
-In Reading View: Display Bible references as JW Library links. 
-In Editing View: Adds Command to convert Bible references and jw.org 'Finder' links to JW Library links.
+**In Reading View**: Display Bible references as JW Library links. 
+
+**In Editing View**: Adds Command to convert Bible references and jw.org 'Finder' links to JW Library links.
 
 ![Logo](logo.png)
 
