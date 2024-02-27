@@ -15,7 +15,7 @@ class JWLibLinker extends obsidian.Plugin {
   }
   async onload() {
 
-    console.log("JW Library Verse Link v." + this.manifest.version + " loaded. " + new Date().toString());
+    console.log("JWLib Linker v." + this.manifest.version + " loaded. " + new Date().toTimeString());
     
     // Show jwlib link in Reading Mode (html)
     this.registerMarkdownPostProcessor((element, context) => {
@@ -116,7 +116,7 @@ const addVerseLinks = (input, changed, type) => {
 
   while ((match = Config.Regex.exec(input) ) !== null) {
     if (match[M.IsLink] === undefined) {
-      let book = (match[M.Ordinal] ?? "") + match[M.Book]; // add the book ordinal if it exists
+      let book = (trim(match[M.Ordinal]) ?? "") + match[M.Book]; // add the book ordinal if it exists
 
       // Use a "Starting with" search only, to avoid matching inside book names, e.g. eph in zepheniah
       let book_match = Bible.Abbreviation.find( elem => elem.search(" " + book.toLowerCase()) !== -1);
@@ -165,19 +165,19 @@ const Config = {
   JWLFinder: "jwlibrary:///finder?",
   Param    : "bible=",
   WebFinder: "https://www.jw.org/finder?",
-  Regex    : /(([123])? ?(\w{2,}|song of solomon) (\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gmi,
+  Regex    : /(([123] ?)?([^\d\s]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gmi, // https://regexr.com/7sjpr
   CmdName  : "Convert to JWL link",
 }
 
 // Match group numbers
 const M = {
   Reference: 1,   // full canonical verse reference, proper case, spaced
-  Ordinal  : 2,   // book ordinal (1, 2, 3) | undefined ??
+  Ordinal  : 2,   // book ordinal (1, 2, 3) | undefined ?? *remember to Trim!
   Book     : 3,   // book name
   Chapter  : 4,   // chapter no.
   Verse    : 5,   // verse no.
   Verses   : 6,   // any additional verses (-3, ,12 etc) | undefined ??
-  IsLink   : 7,   // matches [ or > which means this is already a Wiki or URL link
+  IsLink   : 7,   // matches following ] or >. Match => this is already a Wiki or URL link
 }
 
 const eType = {
