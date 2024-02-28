@@ -24,7 +24,7 @@ class JWLibLinker extends obsidian.Plugin {
 
     // Editor command to trigger the conversion on the active line or selection
     this.addCommand({
-      id: "preview-verse",
+      id: "convert-to-jwl-link",
       name: Config.CmdName,
       editorCallback: (editor, view) => {
         convertToJWLibLink(editor, view);
@@ -60,7 +60,7 @@ class Verse extends obsidian.MarkdownRenderChild {
   }
 
   onload() {
-    let {result, changed} = addVerseLinks(this.containerEl.innerHTML, false, eType.URL);
+    const {result, changed} = addBibleLinks(this.containerEl.innerHTML, false, eType.URL);
     if (changed) {
       this.containerEl.innerHTML = result;
     }
@@ -87,11 +87,10 @@ const convertToJWLibLink = (editor, view) => {
     input = editor.getLine(line_no);
   }
   input = input ?? "";
+  
+  let {result, changed} = swapFinderLinks(input, false);
+  ({result, changed} = addBibleLinks(result, changed, eType.MD));
 
-  let changed = false;
-  let result = input;
-  ({result, changed} = swapFinderLinks(result, changed));
-  ({result, changed} = addVerseLinks(result, changed, eType.Wiki));
   if (changed) {
     if (line_no !== undefined) {
       editor.setLine(line_no, result);
@@ -109,19 +108,20 @@ const convertToJWLibLink = (editor, view) => {
  * @param {eType} type
  * @return {string, boolean}
  */
-const addVerseLinks = (input, changed, type) => {
+const addBibleLinks = (input, changed, type) => {
   let match;
   let verse_markup;
   let result = input;
 
   while ((match = Config.Regex.exec(input) ) !== null) {
     if (match[M.IsLink] === undefined) {
-      let book = (trim(match[M.Ordinal]) ?? "") + match[M.Book]; // add the book ordinal if it exists
-
-      // Use a "Starting with" search only, to avoid matching inside book names, e.g. eph in zepheniah
-      let book_match = Bible.Abbreviation.find( elem => elem.search(" " + book.toLowerCase()) !== -1);
+      // Add the book ordinal if it exists
+      // The abbr. list has no spaces: e.g. 1kings 1ki matthew matt mt
+      // The (^| ) forces a "Starting with" search to avoid matching inside book names, e.g. eph in zepheniah
+      let book = new RegExp("(^| )" + (match[M.Ordinal] ?? "").trim() + match[M.Book].toLowerCase(), "m");
+      let book_match = Bible.Abbreviation.findIndex(elem => elem.search(book) !== -1);
       if (book_match !== undefined) {
-        let book_no = Number(book_match.substring(0, 2));
+        let book_no = book_match + 1;
         let chp_no = match[M.Chapter];
         let verse_no = match[M.Verse];
         let verses = verse_no + (match[M.Verses] ?? "");
@@ -134,7 +134,7 @@ const addVerseLinks = (input, changed, type) => {
         let href = `${Config.JWLFinder}${Config.Param}${verse_ref}`;
         if (type === eType.URL) {
           verse_markup = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
-        } else if (type === eType.Wiki) {
+        } else if (type === eType.MD) {
           verse_markup = `[${display}](${href})`
         }
         result = result.replace(match[M.Reference], verse_markup);
@@ -165,7 +165,7 @@ const Config = {
   JWLFinder: "jwlibrary:///finder?",
   Param    : "bible=",
   WebFinder: "https://www.jw.org/finder?",
-  Regex    : /(([123] ?)?([^\d\s]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gmi, // https://regexr.com/7sjpr
+  Regex    : /(([123] ?)?([\p{L}\p{M}\.]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gmiu, // https://regexr.com/7smfh
   CmdName  : "Convert to JWL link",
 }
 
@@ -173,7 +173,7 @@ const Config = {
 const M = {
   Reference: 1,   // full canonical verse reference, proper case, spaced
   Ordinal  : 2,   // book ordinal (1, 2, 3) | undefined ?? *remember to Trim!
-  Book     : 3,   // book name
+  Book     : 3,   // book name (recognises Unicode accented letters: ready for other languages)
   Chapter  : 4,   // chapter no.
   Verse    : 5,   // verse no.
   Verses   : 6,   // any additional verses (-3, ,12 etc) | undefined ??
@@ -181,8 +181,8 @@ const M = {
 }
 
 const eType = {
-  URL : "URL",
-  Wiki: "Wiki",
+  URL: "URL",  // HTML href link <a>...</a>
+  MD : "MD",     // Markdown link [](...)
 }
 
 const Bible = {
@@ -256,72 +256,72 @@ const Bible = {
   ],
 
   Abbreviation: [
-    "01 genesis ge gen",
-    "02 exodus ex exod",
-    "03 leviticus le lev",
-    "04 numbers nu num",
-    "05 deuteronomy de deut",
-    "06 joshua jos josh",
-    "07 judges jg judg",
-    "08 ruth ru",
-    "09 1samuel 1sa 1sam",
-    "10 2samuel 2sa 2sam",
-    "11 1kings 1ki 1kg",
-    "12 2kings 2ki 2kg",
-    "13 1chronicles 1ch 1chr",
-    "14 2chronicles 2ch 2chr",
-    "15 ezra ezr",
-    "16 nehemiah ne nem",
-    "17 esther es est",
-    "18 job jb",
-    "19 psalms ps psa",
-    "20 proverbs pr pro prov",
-    "21 ecclesiastes ec ecc eccl",
-    "22 song of solomon canticles ca sos sng song",
-    "23 isaiah isa",
-    "24 jeremiah jer",
-    "25 lamentations la lam",
-    "26 ezekiel eze",
-    "27 daniel da dan",
-    "28 hosea ho hos",
-    "29 joel joe joel",
-    "30 amos am amo amos",
-    "31 obadiah ob oba",
-    "32 jonah jon",
-    "33 micah mic",
-    "34 nahum na nah",
-    "35 habakkuk hab",
-    "36 zephaniah zep zeph",
-    "37 haggai hag",
-    "38 zechariah zec zech",
-    "39 malachi mal",
-    "40 matthew mt mat matt",
-    "41 mark mr mk mark",
-    "42 luke lu luke",
-    "43 john joh john",
-    "44 acts ac act",
-    "45 romans ro rom",
-    "46 1corinthians 1co 1cor",
-    "47 2corinthians 2co 2cor",
-    "48 galatians ga gal",
-    "49 ephesians eph",
-    "50 philippians php",
-    "51 colossians col",
-    "52 1thessalonians 1th",
-    "53 2thessalonians 2th",
-    "54 1timothy 1ti 1tim",
-    "55 2timothy 2ti 2tim",
-    "56 titus ti tit",
-    "57 philemon phm",
-    "58 hebrews heb",
-    "59 james jas",
-    "60 1peter 1pe 1pet",
-    "61 2peter 2pe 2pet",
-    "62 1john 1jo 1joh",
-    "63 2john 2jo 2joh",
-    "64 3john 3jo 3joh",
-    "65 jude jud jude",
-    "66 revelation re rev"
+    "genesis ge gen",
+    "exodus ex exod",
+    "leviticus le lev",
+    "numbers nu num",
+    "deuteronomy de deut",
+    "joshua jos josh",
+    "judges jg judg",
+    "ruth ru",
+    "1samuel 1sa 1sam",
+    "2samuel 2sa 2sam",
+    "1kings 1ki 1kg",
+    "2kings 2ki 2kg",
+    "1chronicles 1ch 1chr",
+    "2chronicles 2ch 2chr",
+    "ezra ezr",
+    "nehemiah ne nem",
+    "esther es est",
+    "job jb",
+    "psalms ps psa",
+    "proverbs pr pro prov",
+    "ecclesiastes ec ecc eccl",
+    "song of solomon canticles ca sos sng song",
+    "isaiah isa",
+    "jeremiah jer",
+    "lamentations la lam",
+    "ezekiel eze",
+    "daniel da dan",
+    "hosea ho hos",
+    "joel joe joel",
+    "amos am amo amos",
+    "obadiah ob oba",
+    "jonah jon",
+    "micah mic",
+    "nahum na nah",
+    "habakkuk hab",
+    "zephaniah zep zeph",
+    "haggai hag",
+    "zechariah zec zech",
+    "malachi mal",
+    "matthew mt mat matt",
+    "mark mr mk mark",
+    "luke lu luke",
+    "john joh john",
+    "acts ac act",
+    "romans ro rom",
+    "1corinthians 1co 1cor",
+    "2corinthians 2co 2cor",
+    "galatians ga gal",
+    "ephesians eph",
+    "philippians php",
+    "colossians col",
+    "1thessalonians 1th",
+    "2thessalonians 2th",
+    "1timothy 1ti 1tim",
+    "2timothy 2ti 2tim",
+    "titus ti tit",
+    "philemon phm",
+    "hebrews heb",
+    "james jas",
+    "1peter 1pe 1pet",
+    "2peter 2pe 2pet",
+    "1john 1jo 1joh",
+    "2john 2jo 2joh",
+    "3john 3jo 3joh",
+    "jude jud jude",
+    "revelation re rev"
   ]
 }
 

@@ -1,7 +1,7 @@
 {
 	"id"           : "jwlib-linker",
 	"name"         : "JWLib Linker",
-	"version"      : "0.1.1",
+	"version"      : "0.1.2",
 	"minAppVersion": "1.0.0",
 	"description"  : "Display all bible references as JW Library links In Reading View. Adds a Command to convert bible references and jw.org Finder links to JW Library links in Editing View.",
 	"author"       : "MrBertie",
