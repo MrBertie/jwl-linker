@@ -118,7 +118,7 @@ const addBibleLinks = (input, changed, type) => {
       // Add the book ordinal if it exists
       // The abbr. list has no spaces: e.g. 1kings 1ki matthew matt mt
       // The (^| ) forces a "Starting with" search to avoid matching inside book names, e.g. eph in zepheniah
-      let book = new RegExp("(^| )" + (match[M.Ordinal] ?? "").trim() + match[M.Book].toLowerCase(), "m");
+      let book = new RegExp("(^| )" + (match[M.Ordinal] ?? "").trim() + match[M.Book].replace(".", "").toLowerCase(), "m");
       let book_match = Bible.Abbreviation.findIndex(elem => elem.search(book) !== -1);
       if (book_match !== undefined) {
         let book_no = book_match + 1;
@@ -173,7 +173,7 @@ const Config = {
 const M = {
   Reference: 1,   // full canonical verse reference, proper case, spaced
   Ordinal  : 2,   // book ordinal (1, 2, 3) | undefined ?? *remember to Trim!
-  Book     : 3,   // book name (recognises Unicode accented letters: ready for other languages)
+  Book     : 3,   // book name (recognises fullstops & Unicode accented letters: ready for other languages)
   Chapter  : 4,   // chapter no.
   Verse    : 5,   // verse no.
   Verses   : 6,   // any additional verses (-3, ,12 etc) | undefined ??
