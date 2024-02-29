@@ -120,7 +120,7 @@ const addBibleLinks = (input, changed, type) => {
       // The (^| ) forces a "Starting with" search to avoid matching inside book names, e.g. eph in zepheniah
       let book = new RegExp("(^| )" + (match[M.Ordinal] ?? "").trim() + match[M.Book].replace(".", "").toLowerCase(), "m");
       let book_match = Bible.Abbreviation.findIndex(elem => elem.search(book) !== -1);
-      if (book_match !== undefined) {
+      if (book_match !== -1) {
         let book_no = book_match + 1;
         let chp_no = match[M.Chapter];
         let verse_no = match[M.Verse];
