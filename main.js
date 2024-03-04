@@ -7,7 +7,7 @@
  * 
  */
 
-var obsidian = require('obsidian');
+const obsidian = require('obsidian');
 
 class JWLibLinker extends obsidian.Plugin {
   constructor() {
@@ -112,14 +112,19 @@ const addBibleLinks = (input, changed, type) => {
   let match;
   let verse_markup;
   let result = input;
-
+  let lang = Languages[Settings.Lang];
+  
   while ((match = Config.Regex.exec(input) ) !== null) {
-    if (match[M.IsLink] === undefined) {
+    const next = match[M.Next] ?? "";
+    const already_link = next !== "" && next !== ".";
+    const plain_text = (next !== "" && next === ".") || input.startsWith("<h"); // **Ignore headings for now... complicated!
+
+    if (!already_link) {
       // Add the book ordinal if it exists
       // The abbr. list has no spaces: e.g. 1kings 1ki matthew matt mt
       // The (^| ) forces a "Starting with" search to avoid matching inside book names, e.g. eph in zepheniah
       let book = new RegExp("(^| )" + (match[M.Ordinal] ?? "").trim() + match[M.Book].replace(".", "").toLowerCase(), "m");
-      let book_match = Bible.Abbreviation.findIndex(elem => elem.search(book) !== -1);
+      let book_match = Bible[lang].Abbreviation.findIndex(elem => elem.search(book) !== -1);
       if (book_match !== -1) {
         let book_no = book_match + 1;
         let chp_no = match[M.Chapter];
@@ -127,15 +132,23 @@ const addBibleLinks = (input, changed, type) => {
         let verses = verse_no + (match[M.Verses] ?? "");
 
         // Rebuild a full canonical bible verse reference
-        let display = Bible.Book[book_no - 1] + ' ' + chp_no + ':' + verses;
+        let display = Bible[lang].Book[book_no - 1] + ' ' + chp_no + ':' + verses;
 
-        // Format: 01001006 = Book 01 Chapter 002 Verse 006 = Genesis 2:6
-        let verse_ref = book_no.toString().padStart(2, "0") + chp_no.padStart(3, "0") + verse_no.padStart(3, "0");
-        let href = `${Config.JWLFinder}${Config.Param}${verse_ref}`;
+        let href, verse_ref;
+        // Use the single quote ' before a verse reference to prevent auto-linking
+        if (plain_text) {
+          type = eType.Txt;
+        } else {
+          // Format: 01001006 = Book 01 Chapter 002 Verse 006 = Genesis 2:6
+          verse_ref = book_no.toString().padStart(2, "0") + chp_no.padStart(3, "0") + verse_no.padStart(3, "0");
+          href = `${Config.JWLFinder}${Config.Param}${verse_ref}`;
+        }
         if (type === eType.URL) {
           verse_markup = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
         } else if (type === eType.MD) {
           verse_markup = `[${display}](${href})`
+        } else if (type === eType.Txt) {
+          verse_markup = display;
         }
         result = result.replace(match[M.Reference], verse_markup);
         changed = true;
@@ -161,11 +174,22 @@ const swapFinderLinks = (input, changed) => {
   return {result, changed};
 }
 
+const Settings = {
+  Lang: "English",
+}
+
+const Languages = {
+  "English": "EN",
+  "German" : "DE",
+  "Dutch"  : "NL",
+  "French" : "FR",
+}
+
 const Config = {
   JWLFinder: "jwlibrary:///finder?",
   Param    : "bible=",
   WebFinder: "https://www.jw.org/finder?",
-  Regex    : /(([123] ?)?([\p{L}\p{M}\.]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gmiu, // https://regexr.com/7smfh
+  Regex    : /(([123] ?)?([\p{L}\p{M}\.]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\.|\]|<\/a>)?/gmiu, // https://regexr.com/7smfh
   CmdName  : "Convert to JWL link",
 }
 
@@ -177,152 +201,292 @@ const M = {
   Chapter  : 4,   // chapter no.
   Verse    : 5,   // verse no.
   Verses   : 6,   // any additional verses (-3, ,12 etc) | undefined ??
-  IsLink   : 7,   // matches following ] or >. Match => this is already a Wiki or URL link
+  Next     : 7,   // matches following ] or >. Match => this is already a Wiki or URL link | ' before the verse to stop auto-linking
 }
 
 const eType = {
   URL: "URL",  // HTML href link <a>...</a>
-  MD : "MD",     // Markdown link [](...)
+  MD : "MD",   // Markdown link [](...)
+  Txt: "Txt"   // No link, proper case, expand abbreviations 'Book 1:2
 }
 
 const Bible = {
-  Book: [
-    "Genesis",
-    "Exodus",
-    "Leviticus",
-    "Numbers",
-    "Deuteronomy",
-    "Joshua",
-    "Judges",
-    "Ruth",
-    "1 Samuel",
-    "2 Samuel",
-    "1 Kings",
-    "2 Kings",
-    "1 Chronicles",
-    "2 Chronicles",
-    "Ezra",
-    "Nehemiah",
-    "Esther",
-    "Job",
-    "Psalms",
-    "Proverbs",
-    "Ecclesiastes",
-    "Song of Solomon",
-    "Isaiah",
-    "Jeremiah",
-    "Lamentations",
-    "Ezekiel",
-    "Daniel",
-    "Hosea",
-    "Joel",
-    "Amos",
-    "Obadiah",
-    "Jonah",
-    "Micah",
-    "Nahum",
-    "Habakkuk",
-    "Zephaniah",
-    "Haggai",
-    "Zechariah",
-    "Malachi",
-    "Matthew",
-    "Mark",
-    "Luke",
-    "John",
-    "Acts",
-    "Romans",
-    "1 Corinthians",
-    "2 Corinthians",
-    "Galatians",
-    "Ephesians",
-    "Philippians",
-    "Colossians",
-    "1 Thessalonians",
-    "2 Thessalonians",
-    "1 Timothy",
-    "2 Timothy",
-    "Titus",
-    "Philemon",
-    "Hebrews",
-    "James",
-    "1 Peter",
-    "2 Peter",
-    "1 John",
-    "2 John",
-    "3 John",
-    "Jude",
-    "Revelation",
-  ],
-
-  Abbreviation: [
-    "genesis ge gen",
-    "exodus ex exod",
-    "leviticus le lev",
-    "numbers nu num",
-    "deuteronomy de deut",
-    "joshua jos josh",
-    "judges jg judg",
-    "ruth ru",
-    "1samuel 1sa 1sam",
-    "2samuel 2sa 2sam",
-    "1kings 1ki 1kg",
-    "2kings 2ki 2kg",
-    "1chronicles 1ch 1chr",
-    "2chronicles 2ch 2chr",
-    "ezra ezr",
-    "nehemiah ne nem",
-    "esther es est",
-    "job jb",
-    "psalms ps psa",
-    "proverbs pr pro prov",
-    "ecclesiastes ec ecc eccl",
-    "song of solomon canticles ca sos sng song",
-    "isaiah isa",
-    "jeremiah jer",
-    "lamentations la lam",
-    "ezekiel eze",
-    "daniel da dan",
-    "hosea ho hos",
-    "joel joe joel",
-    "amos am amo amos",
-    "obadiah ob oba",
-    "jonah jon",
-    "micah mic",
-    "nahum na nah",
-    "habakkuk hab",
-    "zephaniah zep zeph",
-    "haggai hag",
-    "zechariah zec zech",
-    "malachi mal",
-    "matthew mt mat matt",
-    "mark mr mk mark",
-    "luke lu luke",
-    "john joh john",
-    "acts ac act",
-    "romans ro rom",
-    "1corinthians 1co 1cor",
-    "2corinthians 2co 2cor",
-    "galatians ga gal",
-    "ephesians eph",
-    "philippians php",
-    "colossians col",
-    "1thessalonians 1th",
-    "2thessalonians 2th",
-    "1timothy 1ti 1tim",
-    "2timothy 2ti 2tim",
-    "titus ti tit",
-    "philemon phm",
-    "hebrews heb",
-    "james jas",
-    "1peter 1pe 1pet",
-    "2peter 2pe 2pet",
-    "1john 1jo 1joh",
-    "2john 2jo 2joh",
-    "3john 3jo 3joh",
-    "jude jud jude",
-    "revelation re rev"
-  ]
+  EN: {
+    Book: [
+      "Genesis",
+      "Exodus",
+      "Leviticus",
+      "Numbers",
+      "Deuteronomy",
+      "Joshua",
+      "Judges",
+      "Ruth",
+      "1 Samuel",
+      "2 Samuel",
+      "1 Kings",
+      "2 Kings",
+      "1 Chronicles",
+      "2 Chronicles",
+      "Ezra",
+      "Nehemiah",
+      "Esther",
+      "Job",
+      "Psalms",
+      "Proverbs",
+      "Ecclesiastes",
+      "Song of Solomon",
+      "Isaiah",
+      "Jeremiah",
+      "Lamentations",
+      "Ezekiel",
+      "Daniel",
+      "Hosea",
+      "Joel",
+      "Amos",
+      "Obadiah",
+      "Jonah",
+      "Micah",
+      "Nahum",
+      "Habakkuk",
+      "Zephaniah",
+      "Haggai",
+      "Zechariah",
+      "Malachi",
+      "Matthew",
+      "Mark",
+      "Luke",
+      "John",
+      "Acts",
+      "Romans",
+      "1 Corinthians",
+      "2 Corinthians",
+      "Galatians",
+      "Ephesians",
+      "Philippians",
+      "Colossians",
+      "1 Thessalonians",
+      "2 Thessalonians",
+      "1 Timothy",
+      "2 Timothy",
+      "Titus",
+      "Philemon",
+      "Hebrews",
+      "James",
+      "1 Peter",
+      "2 Peter",
+      "1 John",
+      "2 John",
+      "3 John",
+      "Jude",
+      "Revelation",
+    ],
+    Abbreviation: [
+      "genesis ge gen",
+      "exodus ex exod",
+      "leviticus le lev",
+      "numbers nu num",
+      "deuteronomy de deut",
+      "joshua jos josh",
+      "judges jg judg",
+      "ruth ru",
+      "1samuel 1sa 1sam",
+      "2samuel 2sa 2sam",
+      "1kings 1ki 1kg",
+      "2kings 2ki 2kg",
+      "1chronicles 1ch 1chr",
+      "2chronicles 2ch 2chr",
+      "ezra ezr",
+      "nehemiah ne nem",
+      "esther es est",
+      "job jb",
+      "psalms ps psa",
+      "proverbs pr pro prov",
+      "ecclesiastes ec ecc eccl",
+      "song of solomon canticles ca sos sng song",
+      "isaiah isa",
+      "jeremiah jer",
+      "lamentations la lam",
+      "ezekiel eze",
+      "daniel da dan",
+      "hosea ho hos",
+      "joel joe joel",
+      "amos am amo amos",
+      "obadiah ob oba",
+      "jonah jon",
+      "micah mic",
+      "nahum na nah",
+      "habakkuk hab",
+      "zephaniah zep zeph",
+      "haggai hag",
+      "zechariah zec zech",
+      "malachi mal",
+      "matthew mt mat matt",
+      "mark mr mk mark",
+      "luke lu luke",
+      "john joh john",
+      "acts ac act",
+      "romans ro rom",
+      "1corinthians 1co 1cor",
+      "2corinthians 2co 2cor",
+      "galatians ga gal",
+      "ephesians eph",
+      "philippians php",
+      "colossians col",
+      "1thessalonians 1th",
+      "2thessalonians 2th",
+      "1timothy 1ti 1tim",
+      "2timothy 2ti 2tim",
+      "titus ti tit",
+      "philemon phm",
+      "hebrews heb",
+      "james jas",
+      "1peter 1pe 1pet",
+      "2peter 2pe 2pet",
+      "1john 1jo 1joh",
+      "2john 2jo 2joh",
+      "3john 3jo 3joh",
+      "jude jud jude",
+      "revelation re rev"
+    ]
+  },
+  FR: {
+    Book: [
+      "Genèse",
+      "Exode",
+      "Lévitique",
+      "Nombres",
+      "Deutéronome",
+      "Josué",
+      "Juges",
+      "Ruth",
+      "1 Samuel",
+      "2 Samuel",
+      "1 Rois",
+      "2 Rois",
+      "1 Chroniques",
+      "2 Chroniques",
+      "Esdras",
+      "Néhémie",
+      "Esther",
+      "Job",
+      "Psaumes",
+      "Proverbes",
+      "Ecclésiaste",
+      "Chant de Salomon",
+      "Isaïe",
+      "Jérémie",
+      "Lamentations",
+      "Ézéchiel",
+      "Daniel",
+      "Osée",
+      "Joël",
+      "Amos",
+      "Abdias",
+      "Jonas",
+      "Michée",
+      "Nahum",
+      "Habacuc",
+      "Sophonie",
+      "Aggée",
+      "Zacharie",
+      "Malachie",
+      "Matthieu",
+      "Marc",
+      "Luc",
+      "Jean",
+      "Actes",
+      "Romains",
+      "1 Corinthiens",
+      "2 Corinthiens",
+      "Galates",
+      "Éphésiens",
+      "Philippiens",
+      "Colossiens",
+      "1 Thessaloniciens",
+      "2 Thessaloniciens",
+      "1 Timothée",
+      "2 Timothée",
+      "Tite",
+      "Philémon",
+      "Hébreux",
+      "Jacques",
+      "1 Pierre",
+      "2 Pierre",
+      "1 Jean",
+      "2 Jean",
+      "3 Jean",
+      "Jude",
+      "Révélation",
+    ],
+    Abbreviation: [
+      "genèse gen ge",
+      "exode exo ex",
+      "lévitique lev le",
+      "nombres nom",
+      "deutéronome de deu deut",
+      "josué jos",
+      "juges jug",
+      "ruth ru",
+      "1samuel 1sam 1sa",
+      "2samuel 1sam 2sa",
+      "1rois 1ro",
+      "2rois 2ro",
+      "1chroniques 1chr 1ch",
+      "2chroniques 2chr 2ch",
+      "esdras esd",
+      "néhémie neh",
+      "esther est",
+      "job",
+      "psaumes psa ps",
+      "proverbes pr pro prov",
+      "ecclésiaste ec ecc eccl",
+      "chant de salomon chant",
+      "isaïe isa is",
+      "jérémie jer",
+      "lamentations lam la",
+      "ézéchiel eze ez",
+      "daniel dan da",
+      "osée os",
+      "joël",
+      "amos",
+      "abdias abd ab",
+      "jonas",
+      "michée mic",
+      "nahum",
+      "habacuc hab",
+      "sophonie sph sop",
+      "aggée agg ag",
+      "zacharie zac",
+      "malachie mal",
+      "matthieu mt mat matt",
+      "marc",
+      "luc",
+      "jean",
+      "actes ac",
+      "romains rom ro",
+      "1corinthiens 1cor 1co",
+      "2corinthiens 2cor 2co",
+      "galates gal ga",
+      "éphésiens eph",
+      "philippiens phil",
+      "colossiens col",
+      "1thessaloniciens 1th",
+      "2thessaloniciens 2th",
+      "1timothée 1tim 1ti",
+      "2timothée 2tim 2ti",
+      "tite",
+      "philémon phm",
+      "hébreux heb he",
+      "jacques jac",
+      "1pierre 1pi",
+      "2pierre 2pi",
+      "1jean 1je",
+      "2jean 2je",
+      "3jean 3 je",
+      "jude",
+      "révélation rev re",
+    ]
+  }
 }
 
 module.exports = {
