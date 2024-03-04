@@ -20,7 +20,10 @@ Open any page that contains bible verse references, e.g. `Rom 1:20; Psalm 89:18;
 
 You should see that all bible verse references are now displayed as hyperlinks; in addition any abbreviated bible book names are written out in full.
 
->Note: This only affects the *Reading View* not the underlying Markdown text
+>Note:
+>1. This only affects the *Reading View* not the underlying Markdown text
+>2. Bible references in Headings do not work yet
+>3. Put a full stop "." after a reference to skip the link
 
 ## In **Editing View**
 
