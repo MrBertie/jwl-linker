@@ -4,10 +4,10 @@ Display all bible references as *JW Library* links In Reading View. Adds a Comma
 
 ![Logo](logo.png)
 
-# How to Install
+# Manual Installation
+Create a `jwlin-linker` folder under `.obsidian/plugins` in your vault. Add the `main.js` and `manifest.json` files from the latest [release](https://github.com/MrBertie/jwlib-linker/releases) to the folder.
 
-Download the latest **jwlib-linker** [release](https://github.com/MrBertie/jwlib-linker/releases), unzip it, and drop the folder into your `{Obsidian Vault}/.obsidian/plugins` folder.  Edit the plugin folder name to remove the version number, e.g. `-v.0.1.1`, and then restart Obsidian.
-You will need to go to the *Plugin Settings* page in Obsidian and enable the plugin.
+>Remember to go to the *Plugin Settings* page in Obsidian and enable the plugin!
 
 # How to Use
 
