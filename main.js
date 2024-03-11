@@ -113,11 +113,15 @@ const addBibleLinks = (input, changed, type) => {
   let verse_markup;
   let result = input;
   let lang = Languages[Settings.Lang];
-  
-  while ((match = Config.Regex.exec(input) ) !== null) {
-    const next = match[M.Next] ?? "";
+
+  // Only accept text elements for now
+  // TODO: 🚧 resolve references in headings and callouts (WIP)
+  const is_text_elem  = input.startsWith("<p>");
+
+  while (is_text_elem && (match = Config.Regex.exec(input) ) !== null) {
+    const next         = match[M.Next] ?? "";
     const already_link = next !== "" && next !== ".";
-    const plain_text = (next !== "" && next === ".") || input.startsWith("<h"); // **Ignore headings for now... complicated!
+    const plain_text = (next !== "" && next === ".");
 
     if (!already_link) {
       // Add the book ordinal if it exists
@@ -126,25 +130,34 @@ const addBibleLinks = (input, changed, type) => {
       let book = new RegExp("(^| )" + (match[M.Ordinal] ?? "").trim() + match[M.Book].replace(".", "").toLowerCase(), "m");
       let book_match = Bible[lang].Abbreviation.findIndex(elem => elem.search(book) !== -1);
       if (book_match !== -1) {
-        let book_no = book_match + 1;
-        let chp_no = match[M.Chapter];
-        let verse_no = match[M.Verse];
-        let verses = verse_no + (match[M.Verses] ?? "");
+        let book_no     = book_match + 1;
+        let chp_no      = match[M.Chapter];
+        let verse_first = match[M.Verse];
+        let verse_extra = match[M.Verses] ?? ""
 
         // Rebuild a full canonical bible verse reference
-        let display = Bible[lang].Book[book_no - 1] + ' ' + chp_no + ':' + verses;
+        let display = Bible[lang].Book[book_no - 1] + ' ' + chp_no + ':' + verse_first + verse_extra;
 
-        let href, verse_ref;
-        // Use the single quote ' before a verse reference to prevent auto-linking
+        let href, book_chp, verse_ref, verse_ref2, verse_last;
+        
         if (plain_text) {
           type = eType.Txt;
         } else {
-          // Format: 01001006 = Book 01 Chapter 002 Verse 006 = Genesis 2:6
-          verse_ref = book_no.toString().padStart(2, "0") + chp_no.padStart(3, "0") + verse_no.padStart(3, "0");
-          href = `${Config.JWLFinder}${Config.Param}${verse_ref}`;
+          // Format: e.g. Genesis 2:6
+          // Book|Chapter|Verse 
+          //  01 |  002  | 006  = 01001006
+          book_chp   = book_no.toString().padStart(2, "0") + chp_no.padStart(3, "0");
+          verse_last = (verse_extra !== "") ? Number(verse_extra.substring(1).trim()) : 0;
+          // If the extra verse is the next, i.e. 1,2 or 14,15 then create a range, otherwise just the first
+          if (verse_extra.startsWith(",") && Number(verse_first) + 1 !== verse_last) {
+            verse_last = 0;
+          }
+          verse_ref2 = (verse_last > 0) ? "-" + book_chp + verse_last.toString().padStart(3, "0") : "";
+          verse_ref  = book_chp + verse_first.padStart(3, "0") + verse_ref2;
+          href       = `${Config.JWLFinder}${Config.Param}${verse_ref}`;
         }
         if (type === eType.URL) {
-          verse_markup = `<a href="${href}" title="${href}">${display}</a>`;  // make the target visible on hover
+          verse_markup = `<a href="${href}" title="${href}">${display}</a>`;  // make the target URL visible on hover
         } else if (type === eType.MD) {
           verse_markup = `[${display}](${href})`
         } else if (type === eType.Txt) {
@@ -193,7 +206,7 @@ const Config = {
   CmdName  : "Convert to JWL link",
 }
 
-// Match group numbers
+// Regex match group numbers
 const M = {
   Reference: 1,   // full canonical verse reference, proper case, spaced
   Ordinal  : 2,   // book ordinal (1, 2, 3) | undefined ?? *remember to Trim!
@@ -201,13 +214,13 @@ const M = {
   Chapter  : 4,   // chapter no.
   Verse    : 5,   // verse no.
   Verses   : 6,   // any additional verses (-3, ,12 etc) | undefined ??
-  Next     : 7,   // matches following ] or >. Match => this is already a Wiki or URL link | ' before the verse to stop auto-linking
+  Next     : 7,   // ] or </a> at end => this is already a Wiki/URL link | "." after the verse to skip auto-linking
 }
 
 const eType = {
   URL: "URL",  // HTML href link <a>...</a>
   MD : "MD",   // Markdown link [](...)
-  Txt: "Txt"   // No link, proper case, expand abbreviations 'Book 1:2
+  Txt: "Txt"   // No link, proper case, expand abbreviations
 }
 
 const Bible = {
