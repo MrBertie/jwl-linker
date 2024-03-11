@@ -116,7 +116,7 @@ const addBibleLinks = (input, changed, type) => {
 
   // Only accept text elements for now
   // TODO: 🚧 resolve references in headings and callouts (WIP)
-  const is_text_elem  = input.startsWith("<p>");
+  const is_text_elem  = !(input.startsWith("<h") || input.startsWith("<div data"));
 
   while (is_text_elem && (match = Config.Regex.exec(input) ) !== null) {
     const next         = match[M.Next] ?? "";
