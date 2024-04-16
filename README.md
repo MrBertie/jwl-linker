@@ -34,6 +34,7 @@ You can either:
 Click anywhere in a line or select text that contains a bible verse reference or a jw.org Finder link [^1].
 Then click the *Convert to JWL link* command and the links should be converted immediately.
 
+
 >Note: Unlike the option above this rewrites bible references as a markdown links in the Markdown text.  The Reading View option above is non-destructive.
 
 ## Opening links
