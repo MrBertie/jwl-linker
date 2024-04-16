@@ -1,11 +1,11 @@
-# JWLib Linker Plugin for [Obsidian](https://obsidian.md)
+# JWL Linker Plugin for [Obsidian](https://obsidian.md)
 
 Display all bible references as *JW Library* links In Reading View. Adds a Command to convert bible references and jw.org 'Finder' links to *JW Library* links in Editing View.
 
 ![Logo](logo.png)
 
 # Manual Installation
-Create a `jwlin-linker` folder under `.obsidian/plugins` in your vault. Add the `main.js` and `manifest.json` files from the latest [release](https://github.com/MrBertie/jwlib-linker/releases) to the folder.
+Create a `jwl-linker` folder under `.obsidian/plugins` in your vault. Add the `main.js` and `manifest.json` files from the latest [release](https://github.com/MrBertie/jwl-linker/releases) to the folder.
 
 >Remember to go to the *Plugin Settings* page in Obsidian and enable the plugin!
 
