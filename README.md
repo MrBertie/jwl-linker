@@ -1,6 +1,6 @@
 # JWL Linker Plugin for [Obsidian](https://obsidian.md)
 
-Display all bible references as *JW Library* links In Reading View. Adds a Command to convert bible references and jw.org 'Finder' links to *JW Library* links in Editing View.
+Display all scripture references as *JW Library* links In Reading View. Adds a commands to convert scriptures references and JW.Org Finder links to *JW Library* links in Editing View, and fetch verse and paragraph citations from JW.Org Finder links.
 
 # How to Install
 
@@ -13,29 +13,93 @@ The plugin has two key features:
 
 ## In **Reading View**
 
-Displays valid bible references as *JW Library* links.
+Displays all valid Scripture References as *JW Library* links.
 Open any page that contains bible verse references, e.g. `Rom 1:20; Psalm 89:18; 1 Cor 9:26, etc...` and then simply switch to *Reading View.*  
 
-You should see that all bible verse references are now displayed as hyperlinks; in addition any abbreviated bible book names are written out in full.
+You should see that all Scripture references are now displayed as functioning hyperlinks; in addition any abbreviated bible book names will be written out in full.  Invalid scripture references will be ignored.
 
->Note: This only affects the *Reading View* not the underlying Markdown text
+> Note: This only affects the *Reading View*, it does not modify the Markdown text.
+
 
 ## In **Editing View**
 
-Adds a Command to convert both Bible references and jw.org "Finder" links to *JW Library* links.
+The plugin provides 7 new Commands:
 
-You can either:
-1. Use the default *Convert to JWL Link* editor command provided (right-click if you are on Desktop, add the command to the Mobile toolbar on phone/tablet)
-2. Use a plugin like *Commander* to add the new command wherever you prefer
-3. Use the *Command Bar* `Ctrl + P` to call up the command as needed; just start typing "jw..." and it should pop up.
+1. Link scripture to JWLibrary
+1. Switch web link to JWLibrary
+1. Cite scripture in full
+1. Cite scripture snippet
+1. Cite paragraph from link
+1. Cite snippet from link
+1. Add title to link
 
-Click anywhere in a line or select text that contains a bible verse reference or a jw.org Finder link [^1].
-Then click the *Convert to JWL link* command and the links should be converted immediately.
+To access the commands:
+- On Desktop: right-click next to the scripture, and choose *Open JWL Linker...*
+- On Mobile: add a toolbar item for the "Open JWL Linker" command.
 
 
->Note: Unlike the option above this rewrites bible references as a markdown links in the Markdown text.  The Reading View option above is non-destructive.
+### Link scripture to JWLibrary
+
+This command converts Bible scripture references to *JW Library* links.
+Click anywhere in a line or select text that contains either a scripture reference then click the command and the scripture should become a local JW Library links.
+
+> Note: Unlike the 'Reading View' option above this command permanently rewrites scripture references as a markdown style link in the Markdown text.  The Reading View option is non-destructive.
+
+### Switch web link to JWLibrary
+
+Converts existing wol.jw.org and jw.org Finder style links [^1] into local JW Library links.
+
+----
+
+### Cite scripture in full
+
+This command fetches bible verse content online and inserts ('cites') the text directly into the markdown content, usually as a Callout (can be changed in the settings via a template).  Any contiguous range of verses is accepted, e.g. `Ac 12:1-4.`
+Click anywhere in the scripture reference, then click the run the command.  The plugin will show a popup notice while it is fetching the citation, and then insert it together with the scripture.
+
+IMPORTANT: only one scripture reference can be fetched at a time.
+
+### Cite scripture snippet
+
+As above but only shows a snippet of the verse text.  THe length of the snippet can be changed in the settings.
+
+----
+
+### Cite paragraph from link
+
+This command fetches the paragraph content from an existing wol.jw.org link and inserts it as a Callout (can also be changed in the settings via template), together with the correct navigation title.
+
+Note: to create this kind of wol.jw.org link first click on a paragraph (you will see faint underlining), then copy the page link.
+
+### Cite snippet from link
+
+As above, but only inserts a snippet of the paragraph.
+
+### Add title to link
+
+Adds the correct navigation title to an existing wol.jw.org link.
+
 
 ## Opening links
-Click on the newly created link to open it in your installed *JW Library* app directly at that verse or publication reference.
 
-[^1]: The type of link you get when you click on the Share Link option, either online or in the *JW Library* App.
+Click on a newly created link to open it directly in your installed *JW Library* app at that scripture or publication reference.
+
+
+# Plugin Settings
+
+1. Scripture citation template: Use the template to define how the cited verses should look. All markdown syntax is accepted.
+2. Paragraph citation template: Use the template to define how the cited paragraph should look. All markdown syntax is accepted.
+3. Snippet citation template.
+4. Snippet word length: how many words to show in the snippet.
+5. Verse number in bold: Should the verse numbers be in bold text?
+6. Link to cited scripture: Should the plugin add a JW Library link to the scripture reference also?
+
+
+# Tips for using Commands
+
+You can also:
+  1. Use a plugin like *Commander* to add the new command wherever you prefer
+  2. Use the *Command palette* `Ctrl + P` to call up the command as needed; just start typing "jw..." and they should pop up.  
+  3. You can also used *Pinned commands* in the *Command Palette* to keep them available at the top (works well on mobile.)
+
+[^1]: The type of link you get when you click on the 'Share Link' option on JW.Org, WOL.Org, or in the *JW Library* App.
+
