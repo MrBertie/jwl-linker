@@ -1,11 +1,11 @@
 {
-	"id"           : "jwlib-linker",
-	"name"         : "JWLib Linker",
+	"id"           : "jwl-linker",
+	"name"         : "JWL Linker",
 	"version"      : "0.1.5",
 	"minAppVersion": "1.0.0",
 	"description"  : "Display all bible references In Reading View as JW Library links, and adds a Command to convert bible references and jw.org Finder links in Editing View to permanent JW Library links.",
 	"author"       : "MrBertie",
-	"authorUrl"    : "https://github.com/MrBertie/jwlib-verse-link",
-	"fundingUrl"   : "https://github.com/MrBertie/jwlib-verse-link",
+	"authorUrl"    : "https://github.com/MrBertie/jwl-linker",
+	"fundingUrl"   : "https://github.com/MrBertie/jwl-linker",
 	"isDesktopOnly": false
 }
