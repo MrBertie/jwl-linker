@@ -2,8 +2,6 @@
 
 Display all bible references as *JW Library* links In Reading View. Adds a Command to convert bible references and jw.org 'Finder' links to *JW Library* links in Editing View.
 
-![Logo](logo.png)
-
 # How to Install
 
 Download the latest **jwl-linker** [release](https://github.com/MrBertie/jwl-linker/releases), unzip it, and drop the folder into your `{Obsidian Vault}/.obsidian/plugins` folder.  Edit the plugin folder name to remove the version number, e.g. `-v.0.1.1`, and then restart Obsidian.
