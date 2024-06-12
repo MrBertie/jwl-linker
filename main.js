@@ -45,7 +45,7 @@ const Config = {
   urlRegex: /https\:\/\/[^\s)]+/gmi,
   urlParam: 'bible=',
   scriptureRegex:
-    /(('?)([123] ?)?([\p{L}\p{M}\.]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gimu, // https://regexr.com/7smfh
+    /(('?)([123][\u0020\u00A0]?)?([\p{L}\p{M}\.]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gimu, // https://regexr.com/7smfh
   wolLinkRegex: /(\[([^\[\]]*)\]\()?(https\:\/\/wol\.jw\.org[^\s\)]{2,})(\))?/gmi,
   delay: 3000,
 };
@@ -103,8 +103,10 @@ class JWLLinkerPlugin extends Plugin {
         menu.addItem((item) => {
           item
           .setTitle(this.menuName.text)
-          .setIcon(this.menuName.icon)
-          .onClick(async () => this.showMenu(editor));
+          .setIcon(this.menuName.icon);
+          // .onClick(async () => this.showMenu(editor));
+          const submenu = item.setSubmenu();
+          this.buildMenu(submenu);
         });
       })
     );
@@ -244,16 +246,20 @@ class JWLLinkerPlugin extends Plugin {
 
   // Prepare the dropdown menu
   // Each menu item calls its command counterpart
-  buildMenu() {
-    const menu = new Menu();
+  buildMenu(submenu = undefined) {
+    /** @type {Menu} */
+    const menu = submenu ? submenu : new Menu();
     // this class is needed to identify if the menu is already open
     menu.dom.addClass(this.menuClass);
-    menu.addItem(item => {
-      item.setTitle(this.menuName.title);
-      item.setIcon(this.menuName.icon);
-      item.setIsLabel(true);
-    });
-    menu.addSeparator();
+    // no title on submenus
+    if (!submenu) {
+      menu.addItem(item => {
+        item.setTitle(this.menuName.title);
+        item.setIcon(this.menuName.icon);
+        item.setIsLabel(true);
+      });
+      menu.addSeparator();
+    }
     Object.entries(this.menuItems).forEach(([id, cmd]) => {
       menu.addItem(item => {
         item.setTitle(cmd.text);
@@ -267,7 +273,7 @@ class JWLLinkerPlugin extends Plugin {
 
   menuName = { 
     id: 'openJWLLinkerMenu', 
-    text: 'Open JWL Linker…',
+    text: 'JWL Linker',
     title: 'JWL Linker',
     icon: 'gem',
   };
@@ -719,7 +725,7 @@ class Lib {
       let verse_range = match.verses;
 
       let book_chap = Bible[lang].Book[book_no - 1] + ' ' + chap_no;
-
+      
       // Does this chapter and verse number exist in the bible?
       if (book_chap in BibleDimensions && verse_no <= BibleDimensions[book_chap]) {
         // Build a canonical bible scripture reference
