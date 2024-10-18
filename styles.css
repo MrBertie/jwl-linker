@@ -1,0 +1,40 @@
+.jwl {
+  padding: 8px !important;
+  .item {
+    padding: 8px;
+    &:hover {
+      color: var(--text-normal);
+      background: var(--background-modifier-active-hover);
+      border-radius: 4px;
+    }
+    p {
+      color: var(--text-muted); 
+      display: -webkit-box;
+      box-orient: vertical;
+      line-clamp: 5;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 5;
+      overflow: hidden;
+      margin: 0 0 4px 0;
+    }
+    p:not(:first-of-type) {
+      font-size: var(--font-smaller);
+    }
+  }
+}
+
+.jwl-settings {
+  textarea {
+    resize: none;
+    width: 20em;
+    height: 5em;
+  }
+}
+
+body.is-phone {
+  .jwl-settings {
+    textarea {
+      width: 100%;
+    }
+  }
+}

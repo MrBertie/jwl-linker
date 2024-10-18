@@ -7,20 +7,23 @@
  *
  */
 
-const { Plugin, Editor, MarkdownView, Menu, Notice, 
-  MarkdownRenderChild, requestUrl, Setting, PluginSettingTab } = require('obsidian');
+const { Plugin, Editor, ItemView, Menu, Notice,
+  MarkdownRenderChild, MarkdownRenderer, requestUrl, 
+  PluginSettingTab, Setting} = require('obsidian');
 
 const DEFAULT_SETTINGS = {
   scriptureTemplate: '> [!verse] BIBLE — {title}\n> {text}\n',
   paragraphTemplate: '> [!cite] PAR. — {title}\n> {text}\n',
-  snippetTemplate: '{title}\u2002“*{text}…*”',
-  snippetLength: 20,
-  boldVerseNo: true,
+  inlineTemplate: '{title}\u2002“*{text}…*”',  // non-breaking space
+  inlineLength: 20,
+  boldVerseNum: true,
   citationLink: true,
+  spaceAfterPunct: true,
+  maxHistory: 25,
   lang: 'English',
 };
 
-// Keep separate from ResultError to allow future i18n
+// Keep separate from OutputError to allow future i18n
 const Lang = {
   name: 'JWL Linker',
   invalidScripture: '⚠️ The reference is not a valid scripture reference.',
@@ -29,6 +32,9 @@ const Lang = {
   loadingCitation: '⏳ Loading citation:',
   noEditor: '⚠️ No active editor available.',
   noSelection: '⚠️ Nothing on cursor line or no selection.',
+  copiedHistoryMsg: 'History item copied to clipboard',
+  noHistoryYet: 'No history to display.',
+  noTitle: 'Title missing',
 };
 
 const Languages = {
@@ -40,46 +46,65 @@ const Languages = {
 
 const Config = {
   jwlFinder: 'jwlibrary:///finder?',
-  wolRoot: 'https://wol.jw.org',
+  wolRoot: 'https://wol.jw.org/en/wol/d/',  // d = direct
+  wolPublications: 'https://wol.jw.org/en/wol/d/r1/lp-e/',
+  wolLookup: 'https://wol.jw.org/en/wol/l/r1/lp-e?q=',  // l = lookup
   webFinder: 'https://www.jw.org/finder?',
-  urlRegex: /https\:\/\/[^\s)]+/gmi,
   urlParam: 'bible=',
+  // [1] whole scripture match [2] plain text [3] book name [4] chapter/verse passages [5] already link
   scriptureRegex:
-    /(('?)([123][\u0020\u00A0]?)?([\p{L}\p{M}\.]{2,}|song of solomon) ?(\d{1,3}):(\d{1,3})([-,] ?\d{1,3})?)(\]|<\/a>)?/gimu, // https://regexr.com/7smfh
+    /(('?)((?:[123][\u0020\u00A0]?)?(?:[\p{L}\p{M}\.]{2,}|song of solomon))((?: ?(?:\d{1,3}):(?:\d{1,3})(?:[-,] ?\d{1,3})*;?)+))(\]|<\/a>)?/gimu,
   wolLinkRegex: /(\[([^\[\]]*)\]\()?(https\:\/\/wol\.jw\.org[^\s\)]{2,})(\))?/gmi,
+  jworgLinkRegex: /(\[([^\[\]]*)\]\()?(https[^\s\)]+jw\.org[^\s\)]{2,})(\))?/gmi,
+  initialNumRegex: /^\>?(\d{1,3}) /gm,
   delay: 3000,
 };
 
-class JWLLinkerPlugin extends Plugin {
-  /** @type {Object} */
-  settings;
-  /** @type {Menu} */
-  menu;
+// All the available commands provided by the plugin
+const Cmd = {
+  convertScriptureToJWLibrary: 'convertScriptureToJWLibrary',
+  convertWebToJWLibrary: 'convertWebToJWLibrary',
+  citePublicationLookup: 'citePublicationLookup',
+  citeScriptureBelow: 'citeScriptureBelow',
+  citeScriptureInline: 'citeScriptureInline',
+  citeParagraphBelow: 'citeParagraphBelow', // 1-3 paragraphs available
+  citeParagraphInline: 'citeParagraphInline',
+  addLinkTitle: 'addLinkTitle',
+}
 
+const JWL_LINKER_VIEW = 'jwl-linker-view';
+
+class JWLLinkerPlugin extends Plugin {
   constructor() {
     super(...arguments);
-
-    /** @namespace */
-    this.api = {
-      validateScripture: Lib.validateScripture,
-      matchPotentialScriptures: Lib.matchPotentialScriptures,
-      DisplayType: DisplayType,
-    };
+      /** @type {Object} */
+    this.settings = {};
+    /** @type {Menu} */
+    this.menu = new Menu();
     this.menuClass = 'jwl-linker-plugin-menu-container';
   }
 
   async onload() {
     await this.loadSettings();
 
-    // Reading Mode: Render scriptures as JWLibrary links
+    /** @type {Lib} */
+    this.lib = new Lib(this.settings);
+    /** @namespace */
+    this.api = {
+      getAllScriptureLinks: this.lib.getAllScriptureLinks,
+      DisplayType: DisplayType,
+    };
+
+    // KEY FEATURE
+    // In READING Mode: Render scriptures as JWLibrary links
     this.registerMarkdownPostProcessor((element, context) => {
-      context.addChild(new ScripturePostProcessor(element));
+      context.addChild(new ScripturePostProcessor(element, this));
     });
 
     // Load command palette
-    Object.entries(this.menuItems).forEach(([id, cmd]) => {
+    this.MenuItems.forEach((cmd) => {
       this.addCommand({
-        id: id,
+        id: cmd.id,
         name: cmd.text,
         icon: cmd.icon,
         editorCallback: cmd.fn,
@@ -89,22 +114,21 @@ class JWLLinkerPlugin extends Plugin {
     // Cache the populated menu
     this.menu = this.buildMenu();
     
-    // Add the global Open Menu command
+    // Add the global Open JWL Menu command (for Mobile toolbar)
     this.addCommand({
-      id: this.menuName.id,
-      name: this.menuName.text,
-      icon: this.menuName.icon,
+      id: this.MenuName.id,
+      name: this.MenuName.text,
+      icon: this.MenuName.icon,
       editorCallback: (editor) => this.showMenu(editor),
     });
     
-    // Add right-click item in Editor to show the Menu
+    // Add right-click submenu item in Editor (Desktop)
     this.registerEvent(
       this.app.workspace.on('editor-menu', (menu, editor, view) => {
         menu.addItem((item) => {
           item
-          .setTitle(this.menuName.text)
-          .setIcon(this.menuName.icon);
-          // .onClick(async () => this.showMenu(editor));
+          .setTitle(this.MenuName.text)
+          .setIcon(this.MenuName.icon);
           const submenu = item.setSubmenu();
           this.buildMenu(submenu);
         });
@@ -113,9 +137,22 @@ class JWLLinkerPlugin extends Plugin {
     
     this.addSettingTab(new JWLLinkerSettingTab(this.app, this));
 
-    console.log('%c' + this.manifest.name + ' ' + this.manifest.version +
-    ' loaded', 'background-color: purple; padding:4px; border-radius:4px');
+    this.registerView(
+      JWL_LINKER_VIEW, 
+      (leaf) => (this.view = new JWLLinkerView(leaf, this.settings)),
+    );
 
+    this.addCommand({
+      id: 'jwl-linker-open',
+      name: 'Open sidebar',
+      callback: this.activateView.bind(this),
+    });
+
+    //this.app.workspace.onLayoutReady(this.activateView.bind(this));
+
+
+    console.log('%c' + this.manifest.name + ' ' + this.manifest.version +
+      ' loaded', 'background-color: purple; padding:4px; border-radius:4px');
   }
 
   onunload() {}
@@ -128,8 +165,121 @@ class JWLLinkerPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  /*================*/
+  async activateView() {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(JWL_LINKER_VIEW).first();
+    if (!leaf) {
+      leaf = workspace.getRightLeaf(false); // false => no split
+      await leaf.setViewState({
+          type: JWL_LINKER_VIEW,
+          active: true,
+        });
+    }
+    workspace.revealLeaf(leaf);
+  }
 
+  /**
+    * KEY FEATURE
+    * Convert input to JW Library links, 
+    * Search entire input string for ...
+    *   1. plain text scripture references
+    *   2. jw.org Finder links | wol.jw.org links
+    * Both are validated and return an error Notice on failure
+    * Editing/Preview View only
+    * @param {Editor} editor
+    * @param {Cmd} command
+  */
+  linkToJWLibrary(editor, command) {
+    editor = this.confirmEditor(editor);
+    if (!editor) return;
+    let { selection } = this.lib.getEditorSelection(editor);
+    if (selection) {
+      let output, changed, error;
+      if (command == Cmd.convertScriptureToJWLibrary) {
+        ({ output, changed, error } = this.lib.convertScriptureToJWLibrary(selection, DisplayType.md));
+      } else if (command == Cmd.convertWebToJWLibrary) {
+        ({ output, changed, error } = this.lib.convertWebToJWLibrary(selection));
+      }
+      if (error !== OutputError.none) {
+        new Notice(Lang[error], Config.delay);
+      } else if (changed) {
+        editor.replaceSelection(output);
+      }
+    } else {
+      new Notice(Lang.noSelection, Config.delay);
+    }
+  }
+
+  /**
+   * KEY FEATURE
+   * Editing/Preview View only:
+   * Cite publication lookup reference, returns all pages in the reference, below
+   * Cite scripture reference in full below or just a snippet inline, adds a JWL link
+   * Cite paragraph or snippet from JW.Org Finder or WOL url, 
+   *    with correct publication navigation title
+   * Add title only: an MD link with correct navigation title + url
+   * @param {Editor} editor
+   * @param {Cmd} command
+   * @param {number} [pars] Number of paragraphs
+   */
+  insertCitation(editor, command, pars = 1) {
+    /** @type {Notice} */
+    let loadingNotice;
+    editor = this.confirmEditor(editor);
+    if (!editor) return;
+    let { selection, caret } = this.lib.getEditorSelection(editor, true);
+    if (selection) {
+      selection = selection.trim();
+      loadingNotice = new Notice(Lang.loadingCitation + ' ' + selection); // remain open until we complete
+      switch (command) {
+        case Cmd.citeScriptureBelow:
+        case Cmd.citeScriptureInline:
+          // Convert Scripture reference into bible verse citation (+ JW Library MD URL*)
+          this.lib.fetchBibleCitation(selection, caret, command, this.view).then(replaceEditorSelection);
+          break;
+        case Cmd.citePublicationLookup:
+          // Convert Publication lookup into a article citation
+          this.lib.fetchLookupCitation(selection, this.view).then(replaceEditorSelection);
+          break;
+        case Cmd.citeParagraphBelow:
+        case Cmd.citeParagraphInline:
+        case Cmd.addLinkTitle:
+          // Convert JW.Org Finder-type URL to a paragraph citation (+ JW Library MD URL*)
+          this.lib.fetchParagraphCitation(selection, caret, command, pars, this.view).then(replaceEditorSelection);
+      }
+    } else {
+      new Notice(Lang.noSelection, Config.delay);
+    }
+
+    function replaceEditorSelection({ output, changed, error }) {
+      if (error !== OutputError.none) {
+        loadingNotice.hide();
+        new Notice(Lang[error], Config.delay);
+      } else if (changed) {
+        editor.replaceSelection(output);
+        loadingNotice.hide();
+      }
+    };
+  }
+
+  /**
+   * Checks if there is an active editor, and attempts to return it
+   * @param {Editor} editor 
+   * @returns {Editor}
+   */
+  confirmEditor(editor) {
+    if (!editor || !editor.hasFocus()) {
+      const view = this.app.workspace.getMostRecentLeaf().view;
+      if (view) {
+        editor = view.editor;
+      }
+    }
+    if (!editor) {
+      new Notice(Lang.noEditor, Config.delay);
+    }
+    return editor;
+  }  
+  
   /**
    * Show the dropdown menu just below the caret
    * @param {Editor} editor 
@@ -153,97 +303,6 @@ class JWLLinkerPlugin extends Plugin {
     });
   }
 
-  /**
-   * Checks if there is an active editor, and attempts to return it
-   * @param {Editor} editor 
-   * @returns {Editor}
-   */
-  confirmEditor(editor) {
-    if (!editor || !editor.hasFocus()) {
-      const view = this.app.workspace.getMostRecentLeaf().view;
-      if (view) {
-        editor = view.editor;
-      }
-    }
-    if (!editor) {
-      new Notice(Lang.noEditor, Config.delay);
-    }
-    return editor;
-  }
-
-  /**
-    * Editing/Preview View only
-    * Convert to JW Library links, 
-    * Applies to the entire input string, works on either:
-    *   target: jw.org Finder links
-    *   target: plain text scripture references
-    * Both are validated
-    * @param {Editor} editor
-    * @param {MarkdownView} view
-    */
-  switchToLibraryLinks(editor, target) {
-    editor = this.confirmEditor(editor);
-    if (!editor) return;
-    let { selection } = Lib.getEditorSelection(editor);
-    if (selection) {
-      let result, changed, error;
-      if (target == TargetType.scripture) {
-        ({ result, changed, error } = Lib.addBibleLinks(selection, DisplayType.md));
-      } else if (target === TargetType.jwonline) {
-        ({ result, changed, error } = Lib.convertToLibraryUrls(selection));
-      }
-      if (error !== ResultError.none) {
-        new Notice(Lang[error], Config.delay);
-      } else if (changed) {
-        editor.replaceSelection(result);
-      }
-    } else {
-      new Notice(Lang.noSelection, Config.delay);
-    }
-  }
-
-  /**
-   * Editing/Preview View only:
-   * Cite scripture reference in full or just a snippet, adds a JWL link
-   * Cite paragraph or snippet from JW.Org Finder or WOL url, 
-   *    with correct publication navigation title
-   * Add title only: an MD link with correct navigation title + url
-   * @param {Editor} editor
-   * @param {MarkdownView} view
-   * @param {CiteType} type
-   */
-  insertCitation(editor, type) {
-    /** @type {Notice} */
-    let loadingNotice;
-    editor = this.confirmEditor(editor);
-    if (!editor) return;
-    let { selection, caret } = Lib.getEditorSelection(editor, true);
-    if (selection) {
-      selection = selection.trim();
-      loadingNotice = new Notice(Lang.loadingCitation + ' ' + selection); // remain open until we complete
-      const is_scripture = (type == CiteType.scriptureEntire || type == CiteType.scriptureSnippet);
-      if (is_scripture) {
-        // Convert Scripture reference into bible verse citation (+ JW Library MD URL*)
-        Lib.addBibleCitation(selection, caret, this.settings, type).then(handleCitation);
-      } else {
-        // Convert JW.Org Finder-type URL to a paragraph citation (+ JW Library MD URL*)
-        Lib.addParagraphCitation(selection, caret, this.settings, type).then(handleCitation);
-      }
-    } else {
-      new Notice(Lang.noSelection, Config.delay);
-    }
-
-    function handleCitation({ result, changed, error }) {
-      if (error !== ResultError.none) {
-        loadingNotice.hide();
-        new Notice(Lang[error], Config.delay);
-      } else if (changed) {
-        editor.replaceSelection(result);
-        loadingNotice.hide();
-      }
-    };
-  }
-
   // Prepare the dropdown menu
   // Each menu item calls its command counterpart
   buildMenu(submenu = undefined) {
@@ -254,92 +313,109 @@ class JWLLinkerPlugin extends Plugin {
     // no title on submenus
     if (!submenu) {
       menu.addItem(item => {
-        item.setTitle(this.menuName.title);
-        item.setIcon(this.menuName.icon);
+        item.setTitle(this.MenuName.title);
+        item.setIcon(this.MenuName.icon);
         item.setIsLabel(true);
       });
       menu.addSeparator();
     }
-    Object.entries(this.menuItems).forEach(([id, cmd]) => {
+    this.MenuItems.forEach((cmd) => {
       menu.addItem(item => {
         item.setTitle(cmd.text);
         item.setIcon(cmd.icon);
-        item.onClick(() => this.app.commands.executeCommandById(this.manifest.id + ':' + id));
+        item.onClick(() => this.app.commands.executeCommandById(this.manifest.id + ':' + cmd.id));
       });
       if (cmd.sep ?? null) menu.addSeparator();
     });
     return menu;
   }
 
-  menuName = { 
-    id: 'openJWLLinkerMenu', 
+  MenuName = { 
+    id: 'openJWLLinkerMenu',
     text: 'JWL Linker',
     title: 'JWL Linker',
     icon: 'gem',
   };
 
-  menuItems = {
-    convertScriptureToLibrary: { 
-      text: 'Link scriptures to JWLibrary', 
+  MenuItems = [
+    {
+      id: Cmd.convertScriptureToJWLibrary,
+      text: 'Convert scripture to JW Library',
       icon: 'library',
-      fn: (editor) => this.switchToLibraryLinks(editor, TargetType.scripture),
+      fn: (editor) => this.linkToJWLibrary(editor, Cmd.convertScriptureToJWLibrary),
     },
-    switchWebToLibrary: { 
-      text: 'Switch web link to JWLibrary', 
+    {
+      id: Cmd.convertWebToJWLibrary,
+      text: 'Convert jw.org url to JW Library',
       icon: 'library',
-      fn: (editor) => this.switchToLibraryLinks(editor, TargetType.jwonline),
+      fn: (editor) => this.linkToJWLibrary(editor, Cmd.convertWebToJWLibrary),
       sep: true,
     },
-    citeScripture: { 
-      text: 'Cite scripture in full', 
-      icon: 'book-open', 
-      fn:  (editor) => this.insertCitation(editor, CiteType.scriptureEntire),
-    },
-    citeScriptureSnippet: { 
-      text: 'Cite scripture snippet', 
-      icon: 'whole-word', 
-      fn:  (editor) => this.insertCitation(editor, CiteType.scriptureSnippet),
+    {
+      id: Cmd.citePublicationLookup,
+      text: 'Cite publication lookup',
+      icon: 'reading-glasses',
+      fn: (editor) => this.insertCitation(editor, Cmd.citePublicationLookup),
       sep: true,
     },
-    citeParagraph: { 
-      text: 'Cite paragraph from link', 
-      icon: 'pilcrow', 
-      fn: (editor) => this.insertCitation(editor, CiteType.wolEntire),
+    {
+      id: Cmd.citeScriptureBelow,
+      text: 'Cite scripture below', 
+      icon: 'book-open',
+      fn:  (editor) => this.insertCitation(editor, Cmd.citeScriptureBelow),
     },
-    citeSnippet: { 
-      text: 'Cite snippet from link', 
+    {
+      id: Cmd.citeScriptureInline,
+      text: 'Cite scripture inline',
+      icon: 'whole-word',
+      fn:  (editor) => this.insertCitation(editor, Cmd.citeScriptureInline),
+      sep: true,
+    },
+    {
+      id: Cmd.citeParagraphBelow + '1',
+      text: 'Cite jw.org url below ¶\u{2008}1',
+      icon: 'pilcrow',
+      fn: (editor) => this.insertCitation(editor, Cmd.citeParagraphBelow),
+    },
+    {
+      id: Cmd.citeParagraphBelow + '2',
+      text: 'Cite jw.org url below ¶\u{2008}2',
+      icon: 'pilcrow',
+      fn: (editor) => this.insertCitation(editor, Cmd.citeParagraphBelow, 2),
+    },
+    {
+      id: Cmd.citeParagraphBelow + '3',
+      text: 'Cite jw.org url below ¶\u{2008}3',
+      icon: 'pilcrow',
+      fn: (editor) => this.insertCitation(editor, Cmd.citeParagraphBelow, 3),
+    },
+    {
+      id: Cmd.citeParagraphInline,
+      text: 'Cite jw.org url inline',
       icon: 'whole-word', 
-      fn: (editor) => this.insertCitation(editor, CiteType.wolSnippet), 
+      fn: (editor) => this.insertCitation(editor, Cmd.citeParagraphInline), 
     },
-    addLinkTitle: { 
-      text: 'Add title to link', 
-      icon: 'link', 
-      fn: (editor) => this.insertCitation(editor, CiteType.wolTitle),
+    {
+      id: Cmd.addLinkTitle,
+      text: 'Add title to jw.org url',
+      icon: 'link',
+      fn: (editor) => this.insertCitation(editor, Cmd.addLinkTitle),
     },
-  };
+  ];
 }
+
 
 /**
- * Reading View only:
- * Render all Scripture references in this HTML element as a JW Library links instead
+ * 🛠️ INTERNAL FUNCTIONS
+ * To handle links, scripture references, and citations
  */
-class ScripturePostProcessor extends MarkdownRenderChild {
-  constructor(containerEl) {
-    super(containerEl);
-  }
-
-  onload() {
-    const { result, changed } = Lib.addBibleLinks(
-      this.containerEl.innerHTML,
-      DisplayType.url
-    );
-    if (changed) {
-      this.containerEl.innerHTML = result;
-    }
-  }
-}
-
 class Lib {
+  /**
+   * @param {Object} settings
+   */
+  constructor (settings) {
+    this.settings = settings;
+  }
 
   /**
    * In the active editor:
@@ -347,18 +423,18 @@ class Lib {
    * (2) sets selection to current line and returns it
    * Assumes an editor is active!
    * @param {Editor} editor
-   * @param {boolean} getLine select and return entire line
+   * @param {boolean} entireLine select and return entire line
    * @returns {{ string, number }} current selection and relative caret position
    */
-  static getEditorSelection(editor, getLine = false) {
+  getEditorSelection(editor, entireLine = false) {
     let selection, caret;
     const cursor = editor.getCursor();
     const line = editor.getLine(cursor.line);
-    // either the (1) current selection
-    if (!getLine && editor.somethingSelected()) {
+    // either (1) current selection
+    if (!entireLine && editor.somethingSelected()) {
       selection = editor.getSelection();
       caret = cursor.ch + line.indexOf(selection);
-    // or the (2) current line (select whole line)
+    // or (2) current line (select entire line)
     } else {
       editor.setSelection({ line: cursor.line, ch: 0 }, { line: cursor.line, ch: line.length });
       selection = editor.getSelection();
@@ -370,443 +446,680 @@ class Lib {
   /**
    * Swaps all jw.org Finder-style and wol.jw.org urls in input text for JW Library app urls
    * @param {string} input
-   * @return {{result: string, changed: boolean}} Updated text with swapped links, changed is true if at least one url changed
+   * @return {{output: string, changed: boolean, error: OutputError}} Updated text with swapped links, changed is true if at least one url changed
    */
-  static convertToLibraryUrls(input) {
-    let result = input;
+  convertWebToJWLibrary(input) {
+    let output = input;
     let changed = false;
-    // first find all possible web urls
-    const urls = input.matchAll(Config.urlRegex);
-    for (const match of urls) {
-      const url = match[0];
-      // Handle wol.jw.org links first
-      if (url.startsWith(Config.wolRoot)) {
-        const { doc_id, par_id } = Lib.getWOLParams(url);
-        result = result
-          .replace(url, Config.jwlFinder + '&docid=' + doc_id + '&par=' + par_id);
-        changed = true;
-      // and now jw.org Finder links, usually already have a par id
-      } else {
-        result = result
-          .replace(Config.webFinder, Config.jwlFinder);
-        changed = true;
-      }
+    const links = this.getLinksInText(input);
+    for (const link of links) {
+      const mdLink = '[' + link.title + '](' + Config.jwlFinder + '&docid=' + link.docId + '&par=' + link.parId + ')';
+      output = output.replace(link.whole, mdLink);
+      changed = true;
     }
-    return { result, changed, error: ResultError.none };
+    return { output, changed, error: OutputError.none };
   }
 
   /**
    * Replaces all valid scripture references in input text with JW Library MD links []()
    * @param {string} input
-   * @param {boolean} changed
-   * @param {DisplayType} type
-   * @return {{result: string, changed: boolean, error: ResultError}}
+   * @param {DisplayType} displayType
+   * @return {{output: string, changed: boolean, error: OutputError}}
    */
-  static addBibleLinks(input, type) {
-    /** @type {TMatch} */
-    let match;
-    let markup;
-    let result = input;
-    let changed = false;
-    let error = ResultError.none;
-
+  convertScriptureToJWLibrary(input, displayType) {
+    let output = input;
+    let changed = false;  // true if at least one scripture reference was recognised
+    let error = OutputError.none;
+    
+    // HACK 🚧 references in headings and callouts break formatting...
     // Only accept text elements for now
-    // TODO: 🚧 resolve references in headings and callouts, breaks formatting...
-    const is_text_elem = !(input.startsWith('<h') || input.startsWith('<div data'));
-
-    if (is_text_elem) {
-      for (match of Lib.matchPotentialScriptures(input)) {
-        // Look for forced plain text
-        if (match.plain) {
-          type = DisplayType.plain;
-        }
-        if (!match.isLink) {
-          let { display, jwlib } = this.validateScripture(match, type);
-          if (display) {  // Is the scripture reference valid?
-            if (type === DisplayType.plain) {
-              markup = display;
-            } else if (type === DisplayType.md) {
-              markup = `[${display}](${jwlib})`;
-            } else if (type === DisplayType.url) {
-              markup = `<a href="${jwlib}" title="${jwlib}">${display}</a>`; // make the target URL visible on hover
+    const isTextElem = !(input.startsWith('<h') || input.startsWith('<div data'));
+    
+    if (isTextElem) {
+      /** @type {TReference} */
+      for (const reference of this.getAllScriptureLinks(input, displayType, this.settings.spaceAfterPunct)) {
+        if (!reference.isLinkAlready) {
+          let referenceMarkup = '';
+          /** @type {TPassage} */
+          for (const passage of reference.passages) {
+            let markup = passage.display;
+            if (passage.link) {
+              if (displayType == DisplayType.md) {
+                markup = `[${passage.display}](${passage.link.jwlib})`;
+              } else if (displayType == DisplayType.url) {
+                markup = `<a href="${passage.link.jwlib}" title="${passage.link.jwlib}">${passage.display}</a>`; // make the target URL visible on hover
+              }
             }
-            result = result.replace(match.reference, markup);
-            changed = true;
-          } else {
-            error = ResultError.invalidScripture;
+            referenceMarkup += passage.delimiter + markup;
           }
+          output = output.replace(reference.original, referenceMarkup);
+          changed = true;
         }
       }
     }
-    return { result, changed, error };
+    return { output, changed, error };
   }
 
   /**
-   * Replaces scripture reference with a sanitized, formatted bible citation
+   * Provides a sanitized, formatted bible citation on the line below or inline with the reference
    * from jw.org html page, could include a jwlib link (see settings.citationLink)
    * @param {string} input Text containing the scripture
    * @param {number} caret Current caret position in the input
-   * @param {Object} settings plugin.settings
-   * @param {CiteType} type
-   * @returns {{result: string, changed: boolean, error: ResultError}}
+   * @param {Cmd} command
+   * @param {View} view
+   * @returns {{output: string, changed: boolean, error: OutputError}}
    */
-  static async addBibleCitation(input, caret, settings, type) {
-    /** @type {TMatch|null} */
-    const match = this.matchPotentialScriptures(input, caret)[0] ?? null; // match at the caret only
-    if (match) {
-      let { display, jwlib, jworg, scripture_ids } = this.validateScripture(
-        match,
-        DisplayType.cite
-      );
-
-      // Is the reference valid?
-      if (display === '') {
-        return { result: input, changed: false, error: ResultError.invalidScripture };
+  async fetchBibleCitation(input, caret, command, view) {
+    /** @type {TReference} */
+    const reference = this.getAllScriptureLinks(input, DisplayType.cite, this.settings.spaceAfterPunct, caret); // match at the caret only
+    const failure = { output: input, changed: false, error: OutputError.noMatch };
+    if (reference) {
+      const passage = reference.passages[0];
+      if (passage.error == OutputError.invalidScripture) {
+        failure.error = passage.error
+        return failure;
       }
-
-      let title = display;
-      if (settings.citationLink) {
-        title = `[${display}](${jwlib})`;
+      let title = passage.display;  // default
+      if (this.settings.citationLink) {
+        title = `[${title}](${passage.link.jwlib})`;
       }
-      
-      try {
-        const res = await requestUrl(jworg);
-        if (res.status === 200) {
-          let lines = [];
-          let clean = '';
-          let glue = '';
-          let template;
-          const num_rgx = /^(\d{1,3}) /;
-          const source = res.text;
-          const dom = new DOMParser().parseFromString(source, 'text/html');
-          scripture_ids.forEach((id) => {
-            let elem = dom.querySelector('#v' + id);
-            if (elem) {
-              clean = this.extractPlainText(elem.innerHTML, TargetType.scripture);
-              // Check for initial chapter numbers
-              if (elem.querySelector('.chapterNum')) {
-                clean = clean.replace(num_rgx, '1 ');
-              // Allow for block or inline verse styling
-              // Prepend a space/newline, except first block
-              } else if (lines.length > 0) {
-                const add_newline =
-                  elem.firstChild.hasClass('style-l') || elem.firstChild.hasClass('newblock');
-                glue = add_newline ? '\n' : ' ';
-              }
-              // make verse number bold, e.g. **4**
-              if (settings.boldVerseNo) {
-                clean = clean.replace(num_rgx, '**$1** ');
-              }
-              lines.push(glue + clean);
-            }
-          });
-          let text = lines.join('');
-          if (type == CiteType.scriptureSnippet) {
-            text = this.firstXWords(text, settings.snippetWords);
-            template = settings.snippetTemplate;
-          } else if (type = CiteType.scriptureEntire) {
-            template = settings.scriptureTemplate;
-          }
-          const citation = template
-            .replace('{title}', title)
-            .replace('{text}', text);
-          const result = input.replace(match.reference, citation);
-          return { result: result, changed: true, error: ResultError.none };
+      let verses = [];
+      let cache = view.getFromHistory(passage.link.jwlib);  // try the cache first
+      if (cache) {
+        verses = cache.content
+      } else {
+        const dom = await this.fetchDOM(passage.link.jworg);
+        passage.link.parIds.forEach((id) => {
+          const follows = verses.length > 0;
+          const clean = this.getElementAsText(dom, '#v' + id, TargetType.scripture, follows);
+          verses.push(clean);
+        });
+      }
+      if (verses) {
+        view.addToHistory(passage.link.jwlib, title, verses);
+        view.showHistory();
+        let text = verses.join('');
+        text = this.boldInitialNumber(text);
+              
+        let template = '', before ='', after = '';
+        if (command == Cmd.citeScriptureInline) {
+          text = this.firstXWords(text, this.settings.inlineLength);
+          template = this.settings.inlineTemplate;
+          before = input.substring(0, reference.begin);
+          after = input.substring(reference.end + 1);
+        } else if (command == Cmd.citeScriptureBelow) {
+          template = this.settings.scriptureTemplate;
+          before = input.substring(0, reference.end) + '\n';
+          after = input.substring(reference.end + 1);
         }
-      } catch (error) {
-        console.log(error);
+        const citation = template.replace('{title}', title).replace('{text}', text);
+        const output = before + citation + after;
+        return { output: output, changed: true, error: OutputError.none };
+      } else {
+        failure.error = OutputError.onlineLookupFailed;
+        return failure;
       }
+    } else {
+      return failure;
     }
-    // default return
-    return { result: input, changed: false, error: ResultError.onlineLookupFailed };
   }
 
   /**
-   * Replaces a wol.jw.org url with a sanitized, formatted paragraph citation
-   * Must be the last thing on the line (to allow space for the new citation)
-   * @param {string} input text containing a wol.jw.org URL
+   * Inserts a sanitized, formatted paragraph citation below a valid wol.jw.org or finder url
+   * @param {string} input text containing a jw.org/finder or wol.jw.org URL
    * @param {number} caret position of the caret in the input
-   * @param {Object} settings plugin.settings
-   * @param {CiteType} citeType paragraph, snippet or title
-   * @returns {{result: string, changed: boolean, error: ResultError}}
+   * @param {Cmd} command full paragraph, inline or title only
+   * @param {number} pars number of paragraphs to extract (1-3 right now)
+   * @param {View} view
+   * @returns {{output: string, changed: boolean, error: OutputError}}
    */
-  static async addParagraphCitation(input, caret, settings, citeType) {
-    let citation = '';
-
-    // The url must be the last thing on the line
-    // Store anything before it like bullets or other text, to be added later.
-    // 🔥Only wol.jw.org links!
-    const { whole, title, url } = this.linkFromCaret(input, caret);
-    if (!URL.canParse(url)) {
-      return { result: input, changed: false, error: ResultError.invalidUrl };
+  async fetchParagraphCitation(input, caret, command, pars, view) {
+    const failure = { output: input, changed: false, error: OutputError.onlineLookupFailed };
+    
+    const match = this.getLinkAtCaret(input, caret);
+    if (!match) {
+      failure.error = OutputError.noMatch;
+      return failure;
     }
+    // TODO this check might not be necessary
+    if (!URL.canParse(match.url)) {
+      failure.error = OutputError.invalidUrl;
+      return failure;
+    }
+    let link = '', content = [];
+    const cache = view.getFromHistory(match.url);
+    if (cache) {
+      link = cache.link;
+      content = cache.content;
+    } else {
+      const dom = await this.fetchDOM(match.url);
+      if (dom) {
+        const pageTitle = this.getElementAsText(dom, 'title', TargetType.jwonline);
+        const pageNav = this.getElementAsText(dom, '#publicationNavigation', TargetType.pubNav);
+        const display = pageNav || pageTitle;
+        link = `[${display}](${match.url})`;
+        // Look for a wol/finder paragraph html #id
+        if (command != Cmd.addLinkTitle && match.parId) {
+          for (let i = 0; i < pars; i++) {
+            content.push(this.getElementAsText(dom, '#p' + match.parId + i, TargetType.jwonline));
+          }
+        }
+      }
+    }
+    if (link) {
+      view.addToHistory(match.url, link, content);
+      view.showHistory();
+      let output = '';
+      if (command == Cmd.addLinkTitle) {
+        // replace the raw url to a full MD link
+        output = input.replace(match.whole, link);
+      } else {
+        let template, text = '', prefix = '';
+        if (command == Cmd.citeParagraphInline) {
+          template = this.settings.inlineTemplate;
+          text = content.join('');
+          text = this.firstXWords(text, this.settings.inlineLength);
+        } else if (command == Cmd.citeParagraphBelow) {
+          template = this.settings.paragraphTemplate;
+          const glue = template[0] == '>' ? '\n>\n>' : '\n';
+          text = content.join(glue);
+          text = this.boldInitialNumber(text);
+          prefix = match.whole + '\n';
+        }
+        const citation = template.replace('{title}', link).replace('{text}', text);
+        // insert the citation below the matched link
+        output = input.replace(match.whole, prefix + citation);
+      }
+      return { output: output, changed: true, error: OutputError.none };
+    } else {
+      return failure;
+    }
+  }
 
+  /**
+   * Fetch wol.jw.org pub references (aka: 'publication reference lookup')
+   * @param {*} input a valid WT style publication reference (copy of selection)
+   * @param {View} view
+   * @return {{string}, {boolean}, {OutputError}}
+   */
+  async fetchLookupCitation (input, view) {
+    const failure = { output: input, changed: false, error: OutputError.onlineLookupFailed };
+
+    // convert WT pub lookup to a search url
+    const lookupUrl = Config.wolLookup + encodeURIComponent(input).replace(/%20/g, '+');
+   
+    let link = '', content = [], text = '';
+    const cache = view.getFromHistory(lookupUrl);  // try the cache first
+    if (cache) {
+      link = cache.link;
+      content = cache.content;
+    } else {
+      const dom = await this.fetchDOM(lookupUrl);
+      if (dom) {
+        const query = this.getElementAsText(dom, '.searchText', TargetType.jwonline);
+        const display = this.getElementAsText(dom, '.cardLine1', TargetType.jwonline);
+        link = `[${query} | ${display}](${lookupUrl})`; // (hard coded formatting)
+        text = this.getElementAsText(dom, '.resultItems', TargetType.jwonline);
+        content.push(text);
+      }
+    }
+    if (link) {
+      view.addToHistory(lookupUrl, link, content);
+      view.showHistory();
+      text = content.join('');
+      text = this.boldInitialNumber(text);
+      const template = this.settings.paragraphTemplate;
+      // Check if template is a callout:
+      // If so all lines need to be part of the callout syntax
+      if (template[0] == '>') {
+        text = text.replace(/^./gm, '>$&').substring(1);
+      }
+      const citation = template.replace('{title}', link).replace('{text}', text);
+      // insert the citation below the lookup query (hard coded formatting)
+      const output = input + '\n' + citation;
+      return { output: output, changed: true, error: OutputError.none };
+    } else {
+      return failure;
+    }
+  }
+
+  /**
+   * Fetch the entire DOM from a web page url
+   * @param {string} url 
+   * @returns {Promise<Document|Null>}
+   */
+  async fetchDOM(url) {
+    let dom = null;
     try {
       const res = await requestUrl(url);
       if (res.status === 200) {
-        const source = res.text;
-        const dom = new DOMParser().parseFromString(source, 'text/html');
-        // title: html title, navigation: the jw citation location
-        const page_title = this.extractPlainText(
-          dom.querySelector('title').innerHTML,
-          TargetType.jwonline
-        );
-        let page_nav = this.extractPlainText(
-          dom.querySelector('#publicationNavigation').innerHTML,
-          TargetType.pubNav
-        );
-        let text = '';
-        if (citeType !== CiteType.wolTitle) {
-          // Look for a wol paragraph #ID
-          const { par_id } = this.getWOLParams(url);
-          if (par_id) {
-            text = this.extractPlainText(dom.querySelector('#p' + par_id).innerHTML);
-          }
-        }
-        let result = '';
-        if (page_title) {
-          const display = page_nav !== '' ? page_nav : page_title;
-          const link = `[${display}](${url})`;
-          if (citeType == CiteType.wolTitle) {
-            citation = link;
-          } else {
-            let template;
-            if (citeType == CiteType.wolSnippet) {
-              template = settings.snippetTemplate;
-              text = this.firstXWords(text, settings.snippetLength);
-            } else if (citeType == CiteType.wolEntire) {
-              template = settings.paragraphTemplate;
-              // make verse number bold, e.g. **4**
-              if ((settings.boldVerseNo)) {
-                text = text.replace(/^(\d{1,3}) /, '**$1** ');
-              }
-            }
-            citation = template
-              .replace('{title}', link)
-              .replace('{text}', text);
-          }
-          result = input.replace(whole, citation);
-          return { result: result, changed: true, error: ResultError.none };
-        }
+        dom = new DOMParser().parseFromString(res.text, 'text/html');
       }
     } catch (error) {
       console.log(error);
     }
-    // default return
-    return { result: input, changed: false, error: ResultError.onlineLookupFailed };
+    return dom;
+  }
+
+  boldInitialNumber(text) {
+    // make paragraph number bold, e.g. **4**
+    if ((this.settings.boldVerseNum)) {
+      text = text.replace(Config.initialNumRegex, '**$1** ');
+    }
+    return text;
   }
 
   /**
-   * Looks for wol links in the input text
-   * Return the link nearest to the caret position, or empty string
-   * @param {string} input 
-   * @param {number} caret 
-   * @returns {{ whole: string, title: string, url: string }}
+   * Extract a specific HTML element from the DOM based on the selector
+   * Convert to plain text and remove markup and unneeded character depending on type
+   * (Try to keep all this messy html cleanup in one place)
+   * Target types:
+   * 1. scripture: from /finder?, need to add line breaks, remove &nbsp;
+   * 2. jwonline: paragraph or article, linebreaks? etc.
+   * 3. pubNav: the navigation title for a specific page location
+   * Returns plain text string
+   * @param {Document} dom  Entire DOM for a webpage url
+   * @param {string} selector Valid html selector
+   * @param {TargetType} type How the text should be converted, scriptures are more complicated
+   * @param {boolean} [follows] Does this element come after previous sibling? 
+  * @return {string} Empty string implies that the selector failed
    */
-  static linkFromCaret(input, caret) {
-    let whole = '', title = '', url = '';
-    const matches = input.matchAll(Config.wolLinkRegex);
+  getElementAsText(dom, selector, type, follows = false) {
+    let text = '';
+    const elem = dom.querySelector(selector) ?? null;
+    if (elem) {
+      if (type == TargetType.scripture) {
+        // for scriptures we need access to the html first to find the linebreaks
+        let html = elem.innerHTML;
+        html = html.replace(/&nbsp;/g, ' '); // remove hard spaces (only in html)
+        const blocks = ['<span class="newblock"></span>', '<span class="parabreak"></span>'].map(
+          (el) => new RegExp(el, 'gm')
+        );
+        blocks.forEach((el) => (html = html.replace(el, '\n')));
+        text = new DOMParser().parseFromString(html, 'text/html').body.textContent;  // finally remove tags
+        // Check for initial chapter numbers (always first element) and replace with 1
+        if (elem.querySelector('.chapterNum')) {
+          text = text.replace(Config.initialNumRegex, '1 ');
+        // Is it block or inline verse styling for following verses?
+        // Do we need to prepend a space/newline?
+        } else if (follows) {
+          const prependLF = elem.firstChild.hasClass('style-l') || elem.firstChild.hasClass('newblock');
+          if (prependLF) { text = '\n' + text; }
+        }
+      } else {
+        text = elem.textContent;
+      }
+      if (type == TargetType.scripture || type == TargetType.jwonline) {
+        text = text
+          .replace(/ {2}/gm, ' ') // remove doubled spaces
+          .replace(/([,.;])(\w)/gm, '$1 $2') // punctuation without a space after
+          .replace(/[\+\*\#]/gm, '') // remove symbols used for annotations
+          .replace(/\r\n/gm, '\n')
+          .replace(/\n{2,4}/gm, '\n') // reduce to single linebreaks only
+      } else if (type == TargetType.pubNav) {
+        text = text
+          .replace(/\t/gm, ' ') // tabs
+          .replace(/[\n\r]/gm, ' ');
+      }
+      text = text.replace(/ {2,}/gmi, ' '); // reduce multiple spaces to single
+      return text.trim();
+    }
+    return text;
+  }
+
+  /**
+   * Looks for all JW web links in the input text
+   * Either wol.jw.org/... or jw.org/finder... style links are accepted
+   * Return an array of matching links or empty array
+   * @param {string} input 
+   * @param {number?} caret 
+   * @returns {Array<TJWLink>}
+   */
+  getLinksInText(input) {
+    const links = [];
+    const matches = input.matchAll(Config.jworgLinkRegex);
+    for (const match of matches) {
+      links.push(this.extractLinkParts(match));
+    }
+    return links;
+  }
+
+  /**
+   * Looks for JW web links, returns the one nearest the caret
+   * Either wol.jw.org/... or jw.org/finder... style links are accepted
+   * Return the link nearest to the caret position, or null
+   * @param {string} input 
+   * @param {number?} caret 
+   * @returns {TJWLink|null}
+   */
+  getLinkAtCaret(input, caret) {
+    let output = null;
+    const matches = input.matchAll(Config.jworgLinkRegex);
     for (const match of matches) {
       const begin = match.index;
       const end = begin + match[0].length;
       if (caret >= begin && caret <= end) {
-        whole = match[0];
-        title = match[1] ? match[2] : '';
-        url = match[3];
+        output = this.extractLinkParts(match);
         break;
       }
     }
-    return { whole, title, url };
+    return output;
   }
 
   /**
-   * Extracts the document and paragraph id from a WOL url
-   * @param {string} url WOL url
-   * @returns {{string, string}} WOL url document id and paragraph number id
+   * Scripture reference match : group of passages in same bible book
+   * @typedef {Object} TReference
+   * @property {boolean} isPlainText  treat as plain text (no hyperlink)?
+   * @property {boolean} isLinkAlready is already a wiki or MD link?
+   * @property {number} begin         begin index position
+   * @property {number} end           end index position
+   * @property {string} original      reference as matched, for replacement purposes
+   * @property {string} book          book name (and ordinal is needed), no spaces
+   * @property {Array<TPassage>} passages  all groups of book/chapter/verse references
    */
-  static getWOLParams(url) {
-    let doc_id, par_id = '';
-    const id = url.split('/').slice(-1)[0];
-    if (id.includes('#h')) {
-      ([ doc_id, par_id ] = id.split('#h=', 2));
-    } else {
-      doc_id = id;
-    }
-    return { doc_id, par_id };
-  }
 
-  /** TMatch type Definition
-   * The standard Scripture reference match return type
-   * @typedef {Object} TMatch ({
-   * @property {string} reference,
-   * @property {boolean} plain,
-   * @property {string} ordinal,
-   * @property {string} book,
-   * @property {string} chapter,
-   * @property {string} verse,
-   * @property {string} verses,
-   * @property {boolean} isLink,
-   * @property {number} begin,
-   * @property {number} end,
+  /**
+   * Passage : chapter + contiguous verse range, 8:1-4; 9:4,5
+   * @typedef {Object} TPassage
+   * @property {PrefixType} prefixType  show the full book name [and chapter]?
+   * @property {string} delimiter     punctuation symbol before the passage text , or ;
+   * @property {string} display       hyperink display name (uses real book name if valid)
+   * @property {number} chapter       chapter number
+   * @property {TVerse} verse         verse range (first, last)
+   * @property {TLink} link           hyperlink info (null if invalid/plaintext)
+   * @property {OutputError} error    possible parsing error
+   */
+
+  /** 
+   * Verse range : first to last (inclusive)
+   * @typedef {Object} TVerse
+   * @property {number} first         first verse in range
+   * @property {number} last          last verse in range
+   * @property {string} separator     between the verse range - or ,
+   */
+
+  /**
+   * @typedef {Object} TLink
+   * @property {string} jwlib         JWLibrary link for the hyperlink
+   * @property {string} jworg         wol.jw.org link to lookup citation
+   * @property {Array<string>} parIds list of par ids to lookup each verse content
    */
 
   /**
    * Try to match and return potential scripture references in the input string
-   * If caret is provided then match the nearest scripture only
-   * @param {string} input
-   * @param {number} caret 
-   * @returns {array<TMatch>} Array list of scripture matches
+   * If caret position is provided then match only the nearest scripture
+   * Returns an array scripture references, one reference = same bible book, 
+   *   each containing an array of passages (unverified)
+   * @param {string} input            Full input text
+   * @param {DisplayType} displayType How will this be displayed?
+   * @param {boolean} spaceAfterPunct Add a space after , or ; punctuation; for display purposes
+   * @param {number} [caret]          Caret position 0+ | undefined
+   * @returns {Array<TReference>|TReference} array list of references | reference (at caret)
    */
-  static matchPotentialScriptures(input, caret = undefined) {
-    /** @type array<TMatch> */
-    let results = [];
+  getAllScriptureLinks(input, displayType, spaceAfterPunct = false, caret = undefined) {
+    /** @type array<TReference> */
+    let references = [];
+    const spc = spaceAfterPunct ? ' ' : '';
+    
     const matches = input.matchAll(Config.scriptureRegex);
+    let referenceCnt = 0;
     for (const match of matches) {
-      /** @type {TMatch} */
-      let result = {
-        reference: match[1], // full matched scripture reference
-        plain: Boolean(match[2]), // ' => skip this verse, no link
-        ordinal: match[3] ?? '', // book ordinal (1, 2, 3) | Empty ?? *remember to Trim!
-        book: match[4], // book name (recognises fullstops & Unicode accented letters: ready for other languages)
-        chapter: match[5], // chapter no.
-        verse: match[6], // verse no.
-        verses: match[7] ?? '', // any additional verses (-3, ,12 etc) | Empty ??
-        isLink: Boolean(match[8]), // ] or </a> at end => this is already a Wiki/URL link | ' before the verse to skip auto-linking
+      let atCaret = false;
+      let original = match[1];
+      let origPassages = match[4];
+      // remove the last semi-colon in a list of passages
+      if (original.slice(-1) == ';') {
+        original = original.slice(0, -1);
+        origPassages = origPassages.slice(0, -1);
+      }
+      let reference = {
+        original: original,
         begin: match.index,
         end: match.index + match[1].length,
+        book: match[3],
+        passages: [],
+        isPlainText: Boolean(match[2]), // ' => skip this verse, no link
+        isLinkAlready: Boolean(match[5]), // ] or </a> at end => this is already a Wiki/URL link | ' before the verse to skip auto-linking
       };
-      // try the scripture nearest the caret position
-      if (caret >= 0) {
-        if (caret >= result.begin && caret <= result.end) {
-          results.push(result);
-          break;
+      // add a sentinel value '|' for caret position in the scripture reference
+      // makes it easy to find the caret once the reference has been split up (parsed)
+      if (caret) {
+        if (caret < reference.book.length) {
+          atCaret = true;
+        } else if (caret >= reference.begin && caret <= reference.end) {
+          caret = caret - reference.begin;
+          origPassages = origPassages.substring(0, caret) + '|' + origPassages.substring(caret);  // insert sentinnel
         }
-      } else {
-        results.push(result);
       }
-    }
-    return results;
-  }
+      const rawPassages = origPassages.split(';');
+      let chapterCnt = 0;
+      for (const rawPassage of rawPassages) {
+        let [chapter, verses] = rawPassage.split(':');
+        chapter = chapter.trim();
+        let verseCnt = 0;
+        let previousPassage = {};
+        for (let rawVerse of verses.split(',')) {
+          // look for the | caret locator first, remove if found!
+          if (chapter.includes('|')) {
+            atCaret = true;
+            chapter = chapter.replace('|', '');
+          } else if (rawVerse.includes('|')) {
+            atCaret = true;
+            rawVerse = rawVerse.replace('|', '');
+          }
 
-  /**
-   * Process a scripture reference in the text and return:
-   * 1. The valid, canonical display version (ps 5:10 => Psalms 5:10)
-   * 2. The correct jw scripture ID for the url args
-   * 3. An array of scripture IDs (one for each verse in a range)
-   *    needed to fetch the verse citations [optional]
-   * @param {TMatch} match Scripture regex matches
-   * @param {DisplayType} type DisplayType
-   * @param {string} lang Current language code (EN DE FR etc)
-   * @returns {{display: string, jwlib: string, jworg: string, scripture_ids: array}}
-   */
-  static validateScripture(match, type) {
-    let display = '';
-    let jwlib = '';
-    let jworg = '';
-    let scripture_ids = [];
-    const lang = Languages[DEFAULT_SETTINGS.lang]; // No user setting available for this yet
+          // convert the verse into a range: first => last (inclusive)
+          const verse = {first: 0, last: 0, separator: '-'};
+          if (rawVerse.includes('-')) {
+            const ab = rawVerse.trim().split('-');
+            verse.first = Number(ab[0]);
+            verse.last = Number(ab[1]);
+            if (verse.last < verse.first) {
+              verse.last = verse.first;
+            }
+          } else {
+            verse.first = Number(rawVerse);
+            verse.last = verse.first;
+          }
+          if (displayType == DisplayType.find) {
+            verse.last = verse.first;
+          }
 
-    // First extract the display name
-    // ******************************
-    // Add the book ordinal if it exists
-    // The abbreviation list has no spaces: e.g. 1kings 1ki matthew matt mt
-    // The (^| ) forces a "Starting with" search to avoid matching inside book names, e.g. eph in zepheniah
-    let book = new RegExp(
-      '(^| )' + match.ordinal.trim() + match.book.replace('.', '').toLowerCase(),
-      'm'
-    );
-    let book_match = Bible[lang].Abbreviation.findIndex((elem) => elem.search(book) !== -1);
+          // check for contiguous verses and add to previous result instead
+          if (verseCnt > 0 && verse.first === previousPassage.verse.first + 1) {
+              previousPassage.verse.last = verse.first;
+              previousPassage.verse.separator = ',' + spc;
+              continue; // skip the rest
+          } 
 
-    // is this a valid bible book?
-    if (book_match !== -1) {
-      let book_no = book_match + 1;
-      let chap_no = match.chapter;
-      let verse_no = match.verse;
-      let verse_range = match.verses;
+          let delimiter = '';
+          if (chapterCnt > 0 && verseCnt == 0) {
+            delimiter = ';' + spc;
+          } else if (verseCnt > 0) {
+            delimiter = ',' + spc
+          }
 
-      let book_chap = Bible[lang].Book[book_no - 1] + ' ' + chap_no;
-      
-      // Does this chapter and verse number exist in the bible?
-      if (book_chap in BibleDimensions && verse_no <= BibleDimensions[book_chap]) {
-        // Build a canonical bible scripture reference
-        display = book_chap + ':' + verse_no;
-        if (type !== DisplayType.first) {
-          display += verse_range;
+          /** @type {PrefixType} */
+          let prefixType = PrefixType.showNone;
+          if (caret && atCaret) {
+            prefixType = PrefixType.showBookChapter;
+          } else {
+            if (chapterCnt == 0) {
+              prefixType = PrefixType.showBookChapter;
+            } else if (verseCnt == 0) {
+              prefixType = PrefixType.showChapter;
+            }
+          }
+
+          const passage = {
+            prefixType: prefixType, // whether to add the book/chapter prefix
+            delimiter: delimiter, // , or ;
+            display: reference.book, // fallback: original book as entered by user
+            chapter: chapter,
+            verse: verse, // first, last
+            link: null,
+            error: OutputError.none,
+          }
+
+          // if caret is defined then we ignore other matches and push only the matching one!
+          if (caret) {
+            if (atCaret) {
+              reference.passages.push(passage);
+              reference = validateReference(reference, displayType);
+              return reference
+            }
+          } else if (displayType = DisplayType.find) {
+            reference.passages.push(passage);
+            reference = validateReference(reference, displayType);
+            return reference
+          } else {
+            reference.passages.push(passage);
+          }
+          previousPassage = passage;
+          verseCnt++;
         }
+        chapterCnt++;
+      }
+      reference = validateReference(reference, displayType);
+      references.push(reference);
+      referenceCnt++
+    }
+    return (references) ? references : null;
+  
+    /**
+    * Process all chap/verse passages in a scripture reference and returns:
+    * 1. The valid, canonical display version (ps 5:10 => Psalms 5:10)
+    * 2. The correct jw scripture ID for the url args, in JWLib and wol.jw.org versions
+    * 3. An array of scripture IDs (one for each verse in a range)
+    *    needed to fetch the verse citations [optional]
+    * @param {TReference} reference Scripture reference (same book, many chapter/verse passages)
+    * @param {DisplayType} displayType plain, md, url, cite, find
+    * @returns {TReference}
+    */
+    function validateReference(reference, displayType) {
+      const lang = Languages[DEFAULT_SETTINGS.lang]; // No user setting available for this yet
 
-        let book_chp,
-          begin,
-          end,
-          range = '',
-          id;
-
-        // Now handle the verse link id
-        // ****************************
-        if (type !== DisplayType.plain && type !== DisplayType.first) {
+      // First is this a valid bible book?
+      // *********************************
+      // The abbreviation list has no spaces: e.g. 1kings 1ki matthew matt mt
+      // The (^| ) forces a "Starting with" search to avoid matching inside book names, e.g. eph in zepheniah
+      let bookNum = 0;
+      const bookRgx = new RegExp('(^| )' + reference.book.replace(' ', '').replace('.', '').toLowerCase(), 'm'); // no spaces or .
+      const bookMatch = Bible[lang].Abbreviation.findIndex((elem) => elem.search(bookRgx) !== -1);
+      if (bookMatch !== -1) {
+        reference.book = Bible[lang].Book[bookMatch];
+        bookNum = bookMatch + 1;
+      }
+      
+      // Now handle each chapter:verse(s) passage
+      /** @type {TPassage} */
+      for (const passage of reference.passages) {
+        const first = passage.verse.first;
+        const last = passage.verse.last;
+        
+        // Build a canonical bible scripture reference
+        // *******************************************
+        // NOTE: passage.display default is the original book text from user
+        const bookAndChapter = reference.book + ' ' + passage.chapter;
+        if (passage.prefixType == PrefixType.showBookChapter) {
+          passage.display = bookAndChapter;
+        } else if (passage.prefixType == PrefixType.showChapter) {
+          passage.display = passage.chapter;
+        }
+        passage.display +=  ':' + first + (last > first ? passage.verse.separator + last : '');
+        
+        // Add the hyperlinks
+        // ******************
+        // Does this chapter and verse range exist in the bible? If so, create the link
+        let link = {};
+        if (bookAndChapter in BibleDimensions 
+          && first <= BibleDimensions[bookAndChapter]
+          && last <= BibleDimensions[bookAndChapter]) {
+          /** @type {TLink} */
+          link = {
+            jwlib: '',
+            jworg: '',
+            parIds: [],
+          }
+          // Handle the verse link id
           // Format: e.g. Genesis 2:6
           // Book|Chapter|Verse
           //  01 |  002  | 006  = 01001006
-          book_chp = book_no.toString().padStart(2, '0') + chap_no.padStart(3, '0');
-          begin = Number(verse_no);
+          // Verse range = 01001006-01001010 e.g. Gen 2:6-10
+          // 🔥IMPORTANT: with jw.org par ids the leading 0 is skipped!
+          if (displayType !== DisplayType.plain || displayType !== DisplayType.find) {
+            const bookChapId = bookNum.toString() + passage.chapter.toString().padStart(3, '0');
+            let id = bookChapId + first.toString().padStart(3, '0');
+            if (last > first) {
+              id += '-' + bookChapId + last.toString().padStart(3, '0');
+            }
+            link.jwlib = `${Config.jwlFinder}${Config.urlParam}${id}`;
 
-          // Is there a range of verses?
-          end = verse_range !== '' ? Number(verse_range.substring(1).trim()) : begin;
-
-          // Also accept  adjacent verse after a comma: 1,2 or 14,15, etc
-          // Otherwise just the first verse: 1,4 or 22,27
-          if (verse_range.startsWith(',') && end !== begin + 1) {
-            end = begin;
+            // Finally, handle the (verse) par ids used to fetch the citation from jw.org
+            if (displayType == DisplayType.cite) {
+              link.jworg = `${Config.webFinder}${Config.urlParam}${id}`;
+              for (let i = first; i <= last; i++) {
+                link.parIds.push(bookChapId + i.toString().padStart(3, '0'));
+              }
+            }
           }
-
-          if (end > begin) {
-            range = '-' + book_chp + end.toString().padStart(3, '0');
-          }
-          id = book_chp + verse_no.padStart(3, '0') + range;
-          jwlib = `${Config.jwlFinder}${Config.urlParam}${id}`;
+        } else {
+          passage.error = OutputError.invalidScripture;
+          link = null;
         }
-
-        // Finally, handle the verse ids used to fetch the citation from jw.org
-        // *****************************
-        if (type == DisplayType.cite) {
-          jworg = `${Config.webFinder}${Config.urlParam}${id}`;
-          for (let i = begin; i <= end; i++) {
-            scripture_ids.push(book_no + chap_no.padStart(3, '0') + i.toString().padStart(3, '0'));
-          }
-        }
+        passage.link = link;
       }
+      return reference;
     }
-    return { display, jwlib, jworg, scripture_ids };
   }
 
   /**
-   * Remove markup and jw.org markup from HTML
-   * Returns plain text
-   * @param {string} html
-   * @param {TargetType} type
-   * @returns {string}
+   * @typedef {Object} TJWLink
+   * @property {string} whole
+   * @property {string} title
+   * @property {string} url
+   * @property {string} docId
+   * @property {string} parId
    */
-  static extractPlainText(html, type) {
-    const blocks = ['<span class="newblock"></span>', '<span class="parabreak"></span>'].map(
-      (el) => new RegExp(el, 'gm')
-    );
-    html = html.replace(/&nbsp;/g, ' '); // hard spaces
-    blocks.forEach((el) => (html = html.replace(el, '\n')));
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    let text = doc.body.textContent ?? ''; // this does most of the work to remove html tags
-    if (type == TargetType.scripture || type == TargetType.jwonline) {
-      text = text
-        .replace(/ {2}/gm, ' ') // remove doubled spaces
-        .replace(/([,.;])(\w)/gm, '$1 $2') // punctuation without a space after
-        .replace(/[\+\*\#]/gm, '') // remove symbols used for annotations
-        .replace(/\r\n/gm, '\n')
-        .replace(/\n{2,4}/gm, '\n') // single linebreaks only
-    } else if (type == TargetType.pubNav) {
-      text = text
-        .replace(/\t/gm, ' ') // tabs
-        .replace(/[\n\r]/gm, ' ');
+
+  /**
+   * Extracts all the parts of a JW web url
+   * Either /finder? style or wol.jw.org style
+   * Only accepts publication links, not verses or home page meeting workbook links
+   * @param {string} match Regex match of a JW web url (wol or finder style)
+   * @returns {TJWLink|null}
+   */
+  extractLinkParts(match) {
+    let url = match[3];
+    let docId = '', parId = '';
+    if (url.startsWith(Config.wolRoot)) {
+      const id = url.split('/').slice(-1)[0];
+      if (id && id.includes('#h')) {
+        ([ docId, parId ] = id.split('#h=', 2));
+      } else {
+        docId = id ?? '';
+      }
+    } else if (url.startsWith(Config.webFinder)) {
+      const params = new URLSearchParams(url);
+      docId = params.get('docid') ?? '';
+      parId = params.get('par') ?? '';
+      if (docId) {
+        // switch the link style from finder to wol 
+        // so that we can scrape the paragraph content later if needed
+        url = Config.wolPublications + docId + '#h=' + parId;
+      } else {
+        return null;
+      }
+    } else {
+      return null;
     }
-    text = text.replace(/ {2,}/gmi, ' '); // reduce multiple spaces to one
-    return text.trim();
+    return {
+      whole: match[0],
+      title: match[1] ? match[2] : Lang.noTitle,
+      url: url,
+      docId: docId,
+      parId: parId,
+    }
   }
 
   /**
@@ -815,12 +1128,151 @@ class Lib {
    * @param {number} count how many words
    * @returns {string}
    */
-  static firstXWords(sentence, count) {
+  firstXWords(sentence, count) {
     const words = sentence.split(/\s/);
     if (words.length > count) {
       return words.slice(0, count).join(' ') + '…';
     } else {
       return sentence;
+    }
+  }
+}
+
+
+class JWLLinkerView extends ItemView {
+  constructor(leaf, settings) {
+    super(leaf);
+    this.settings = settings;
+    this.historyEl;
+    /** @type {Array<THistory>} */
+    this.history = [];
+  }
+
+  getViewType() {
+    return JWL_LINKER_VIEW;
+  }
+
+  getDisplayText() {
+    return Lang.name;
+  }
+
+  getIcon() {
+    return 'gem';
+  }
+
+  // Update state from workspace
+  async setState(state, result) {
+    this.history = state.history ?? [];
+    this.showHistory();
+    await super.setState(state, result);
+  }
+
+  // Save state to workspace
+  getState() {
+    let state = super.getState();
+    state.history = this.history;
+    return state;
+  }
+
+  async onOpen() {
+    this.historyEl = this.contentEl;
+    this.historyEl.addClass('jwl');
+    this.showHistory();
+
+    this.historyEl.onclick = (event) => {
+      if (event.target.tagName === 'P') {
+        const item = this.history[event.target.parentElement.parentElement.id]
+        if (item) {
+          const md = item.link + '\n' + item.content;
+          navigator.clipboard.writeText(md);
+          new Notice(Lang.copiedHistoryMsg, 2000);
+        }
+      }
+    }
+  }
+  
+  async onClose() {
+    this.unload();
+  }
+
+  /* 🛠️ INTERNAL FUNCTIONS */
+
+  /** 
+   * @typedef {{url: string, link: string, content: Array<string>}} THistory
+  */
+
+  showHistory() {
+    this.historyEl.empty();
+    if (this.history.length > 0) {
+      const parent = new MarkdownRenderChild(this.containerEl);
+      this.history.forEach((item, index) => {
+        const itemEl = this.historyEl.createDiv({ cls: 'item', attr: { id: index } });
+        const linkEl = itemEl.createEl('p');
+        MarkdownRenderer.render(this.app, item.link, linkEl, '/', parent);
+        const textEl = itemEl.createEl('p');
+        MarkdownRenderer.render(this.app, item.content.join(''), textEl, '/', parent);
+      });
+    } else {
+      this.historyEl.createDiv({ cls: 'pane-empty', text: Lang.noHistoryYet });
+    }
+  }
+
+  clearHistory() {
+    this.history = [];
+    this.getState();
+    this.showHistory();
+  }
+
+  /**
+   * Add a new history item to the top of the list
+   * Note: part of view class as history is stored in the view's state
+   * @param {string} url Primary key
+   * @param {string} link The MD link
+   * @param {Array} content The text content (array of strings)
+   */
+  addToHistory(url, link, content) {
+    /** @type {THistory} */
+    const newItem = { url, link, content };
+    this.history = this.history.filter(item => item.url !== newItem.url); // no duplicates
+    this.history = [newItem, ...this.history]; // add to the top
+    if (this.history.length > this.settings.maxHistory) {
+      this.history = this.history.slice(0, this.settings.maxHistory);
+    }
+  }
+
+  /**
+   * 
+   * @param {string} url 
+   * @returns {Array<THistory>|undefined}
+   */
+  getFromHistory(url) {
+    const cache = this.history.find((item) => item.url === url);
+    return (cache ? { ...cache } : undefined);
+  }
+
+}
+
+/**
+ * Reading View only:
+ * Render all Scripture references in this HTML element as a JW Library links instead
+ */
+class ScripturePostProcessor extends MarkdownRenderChild {
+  /**
+   * @param {HTMLElement} containerEl 
+   * @param {Plugin} plugin 
+   */
+  constructor(containerEl, plugin) {
+    super(containerEl);
+    this.plugin = plugin;
+  }
+
+  onload() {
+    const { output, changed } = this.plugin.lib.convertScriptureToJWLibrary(
+      this.containerEl.innerHTML,
+      DisplayType.url
+    );
+    if (changed) {
+      this.containerEl.innerHTML = output;
     }
   }
 }
@@ -833,98 +1285,108 @@ class JWLLinkerSettingTab extends PluginSettingTab {
 
   display() {
     const { containerEl } = this;
-    const default_template = '{title}\n{text}\n';
-    const rows = 3;
-    const cols = 25;
+    const defaultTemplate = '{title}\n{text}\n';
 
     containerEl.empty();
+    containerEl.addClass('jwl-settings');
 
     new Setting(containerEl)
-      .setName(this.plugin.manifest.name)
-      .setDesc('📝 Templates all accept the following substitutions: {title}, {text}')
+      .setName('Display')
+      .setDesc('You can use the following substitutions in the templates: {title}, {text}')
       .setHeading();
 
     new Setting(containerEl)
       .setName('Scripture citation template')
-      .setDesc('Use this template when citing entire Bible verses.')
+      .setDesc('Use this template when citing entire Bible verses. This is inserted below the source reference.')
       .addTextArea((text) => {
         text
-          .setPlaceholder(default_template)
+          .setPlaceholder(defaultTemplate)
           .setValue(this.plugin.settings.scriptureTemplate)
           .onChange(async (value) => {
             this.plugin.settings.scriptureTemplate = value;
             await this.plugin.saveSettings();
           });
-        text.inputEl.rows = rows;
-        text.inputEl.cols = cols;
       });
 
     new Setting(containerEl)
       .setName('Paragraph citation template')
       .setDesc(
-        'Use this template when citing an entire paragraph from a publication.'
+        'Use this template when citing entire paragraph(s) or an article lookup from a publication. This is inserted below the source link.'
       )
       .addTextArea((text) => {
         text
-          .setPlaceholder(default_template)
+          .setPlaceholder(defaultTemplate)
           .setValue(this.plugin.settings.paragraphTemplate)
           .onChange(async (value) => {
             this.plugin.settings.paragraphTemplate = value;
             await this.plugin.saveSettings();
           });
-        text.inputEl.rows = rows;
-        text.inputEl.cols = cols;
       });
       
     new Setting(containerEl)
-      .setName('Snippet citation template')
+      .setName('Inline citation template')
       .setDesc(
-        'Use this template when citing a short snippet from a scripture or a publication.'
+        'Use this template when citing a short inline excerpt from a scripture or a publication.'
       )
       .addTextArea((text) => {
         text
-          .setPlaceholder(default_template)
-          .setValue(this.plugin.settings.snippetTemplate)
+          .setPlaceholder(defaultTemplate)
+          .setValue(this.plugin.settings.inlineTemplate)
           .onChange(async (value) => {
-            this.plugin.settings.snippetTemplate = value;
+            this.plugin.settings.inlineTemplate = value;
             await this.plugin.saveSettings();
           });
-        text.inputEl.rows = rows;
-        text.inputEl.cols = cols;
       });
       
     new Setting(containerEl)
-      .setName('Snippet word length')
+      .setName('No. of words inline')
       .setDesc(
-        'Restrict the snippet length to this many words (1-100).'
+        'Restrict the inline snippet length to this many words (1-100).'
       )
       .addSlider((sld) => {
         sld
           .setDynamicTooltip()
           .setLimits(1, 100, 1)
-          .setValue(this.plugin.settings.snippetWords)
+          .setValue(this.plugin.settings.inlineLength)
           .onChange(async (value) => {
-            this.plugin.settings.snippetWords = value;
+            this.plugin.settings.inineLiength = value;
+            await this.plugin.saveSettings();
+          })
+          .showTooltip();
+      });
+      
+    new Setting(containerEl)
+      .setName('No. of history items')
+      .setDesc(
+        'How many history items to show in the sidebar (1-100).'
+      )
+      .addSlider((sld) => {
+        sld
+          .setDynamicTooltip()
+          .setLimits(1, 100, 1)
+          .setValue(this.plugin.settings.maxHistory)
+          .onChange(async (value) => {
+            this.plugin.settings.maxHistory = value;
             await this.plugin.saveSettings();
           })
           .showTooltip();
       });
 
     new Setting(containerEl)
-      .setName('Verse numbers in bold')
+      .setName('Initial numbers in bold')
       .setDesc(
         'Apply bold markup to verse or paragraph numbers in the cited text — to better distinguish them.'
       )
       .addToggle((tog) => {
-        tog.setValue(this.plugin.settings.boldVerseNo).onChange(async (value) => {
-          this.plugin.settings.boldVerseNo = value;
+        tog.setValue(this.plugin.settings.boldVerseNum).onChange(async (value) => {
+          this.plugin.settings.boldVerseNum = value;
           await this.plugin.saveSettings();
         });
       });
 
     new Setting(containerEl)
-      .setName('Link to cited scripture')
-      .setDesc('Add a JW Library link also when inserting scripture citations.')
+      .setName('Link cited scriptures')
+      .setDesc('Add a JW Library link when inserting scripture citations.')
       .addToggle((tog) => {
         tog.setValue(this.plugin.settings.citationLink).onChange(async (value) => {
           this.plugin.settings.citationLink = value;
@@ -932,11 +1394,14 @@ class JWLLinkerSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl).setName('Reset').setHeading();
+    new Setting(containerEl)
+      .setName('Reset')
+      .setDesc('This cannot be undone.')
+      .setHeading();
 
     new Setting(containerEl)
-      .setName('Reset all to default')
-      .setDesc('Return all settings to their original defaults. ⚠️ This cannot be undone.')
+      .setName('Reset to default')
+      .setDesc('Return all settings to their original defaults.')
       .addButton((btn) => {
         btn.setIcon('reset')
         btn.onClick(async () => {
@@ -945,15 +1410,17 @@ class JWLLinkerSettingTab extends PluginSettingTab {
           this.display();
         });
       });
-  }
-}
 
-const CiteType = {
-  scriptureEntire: 'scriptureEntire',
-  scriptureSnippet: 'scriptureSnippet',
-  wolEntire: 'wolEntire',
-  wolSnippet: 'wolSnippet',
-  wolTitle: 'wolTitle',
+    new Setting(containerEl)
+      .setName('Clear history')
+      .setDesc('Clear the list of items in the history sidebar.')
+      .addButton((btn) => {
+        btn.setIcon('reset')
+        btn.onClick(async () => {
+          this.plugin.view.clearHistory();
+        });
+      });
+  }
 }
 
 const TargetType = {
@@ -966,12 +1433,19 @@ const DisplayType = {
   url: 'url', // HTML href link <a>...</a>
   md: 'md', // Markdown link [](...)
   plain: 'plain', // No link, proper case, expand abbreviations
-  first: 'first', // Just the first verse only, no extra ranges
   cite: 'cite', // Fetch and insert the full verse text
+  find: 'find', // For use in a search/find box, first result only
 };
 
-const ResultError = {
+const PrefixType = {
+  showNone: 'showNone',
+  showChapter: 'showChapter',
+  showBookChapter: 'showBookChapter',
+}
+
+const OutputError = {
   none: 'none',
+  noMatch: 'noMatch',
   invalidScripture: 'invalidScripture',
   invalidUrl: 'invalidUrl',
   oneReferenceOnly: 'oneReferenceOnly',
