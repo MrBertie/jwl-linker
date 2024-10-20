@@ -9,7 +9,7 @@
 
 const { Plugin, Editor, ItemView, Menu, Notice,
   MarkdownRenderChild, MarkdownRenderer, requestUrl, 
-  PluginSettingTab, Setting} = require('obsidian');
+  PluginSettingTab, Setting, setIcon, setTooltip} = require('obsidian');
 
 const DEFAULT_SETTINGS = {
   scriptureTemplate: '> [!verse] BIBLE — {title}\n> {text}\n',
@@ -35,6 +35,11 @@ const Lang = {
   copiedHistoryMsg: 'History item copied to clipboard',
   noHistoryYet: 'No history to display.',
   noTitle: 'Title missing',
+  helpIntro: 'This sidebar shows all the recent verses, paragraphs, and publications you have cited using the plugin.',
+  helpCopy: 'Click any item above to copy it to the clipboard.',
+  helpClear: 'Click here to clear the search history.',
+  hideTip: 'Click to hide',
+  help: 'Help',
 };
 
 const Languages = {
@@ -67,7 +72,7 @@ const Cmd = {
   citePublicationLookup: 'citePublicationLookup',
   citeScriptureBelow: 'citeScriptureBelow',
   citeScriptureInline: 'citeScriptureInline',
-  citeParagraphBelow: 'citeParagraphBelow', // 1-3 paragraphs available
+  citeParagraphBelow: 'citeParagraphBelow', // optionally 1-3 paragraphs
   citeParagraphInline: 'citeParagraphInline',
   addLinkTitle: 'addLinkTitle',
 }
@@ -148,9 +153,6 @@ class JWLLinkerPlugin extends Plugin {
       callback: this.activateView.bind(this),
     });
 
-    //this.app.workspace.onLayoutReady(this.activateView.bind(this));
-
-
     console.log('%c' + this.manifest.name + ' ' + this.manifest.version +
       ' loaded', 'background-color: purple; padding:4px; border-radius:4px');
   }
@@ -220,7 +222,7 @@ class JWLLinkerPlugin extends Plugin {
    * Add title only: an MD link with correct navigation title + url
    * @param {Editor} editor
    * @param {Cmd} command
-   * @param {number} [pars] Number of paragraphs
+   * @param {number} [pars] *Number of paragraphs to cite
    */
   insertCitation(editor, command, pars = 1) {
     /** @type {Notice} */
@@ -303,8 +305,11 @@ class JWLLinkerPlugin extends Plugin {
     });
   }
 
-  // Prepare the dropdown menu
-  // Each menu item calls its command counterpart
+  /**
+   * Prepare the dropdown menu. Each menu item calls its command counterpart
+   * @param {*} submenu True if this menu is a submenu of a parent menu
+   * @returns New menu ready to use
+   */
   buildMenu(submenu = undefined) {
     /** @type {Menu} */
     const menu = submenu ? submenu : new Menu();
@@ -968,7 +973,7 @@ class Lib {
               reference = validateReference(reference, displayType);
               return reference
             }
-          } else if (displayType = DisplayType.find) {
+          } else if (displayType == DisplayType.find) {
             reference.passages.push(passage);
             reference = validateReference(reference, displayType);
             return reference
@@ -1146,6 +1151,9 @@ class JWLLinkerView extends ItemView {
     this.historyEl;
     /** @type {Array<THistory>} */
     this.history = [];
+    this.helpEl;
+    this.expandHelpEl;
+    this.helpExpanded = true;
   }
 
   getViewType() {
@@ -1175,9 +1183,17 @@ class JWLLinkerView extends ItemView {
   }
 
   async onOpen() {
-    this.historyEl = this.contentEl;
-    this.historyEl.addClass('jwl');
-    this.showHistory();
+    this.historyEl = this.contentEl.createDiv({ cls: 'jwl' });
+
+    const detailsEl = createEl('details');
+    detailsEl.createEl('summary', { text: Lang.help });
+    detailsEl.createEl('p', { text: Lang.helpIntro });
+    const detailEl = detailsEl.createEl('ul');
+    detailEl.createEl('li', { text: Lang.helpCopy });
+    const wipeEl = detailEl.createEl('li', { text: Lang.helpClear, cls: 'clear-history' });
+
+    this.showHistory;
+    this.contentEl.append(detailsEl);
 
     this.historyEl.onclick = (event) => {
       if (event.target.tagName === 'P') {
@@ -1188,6 +1204,10 @@ class JWLLinkerView extends ItemView {
           new Notice(Lang.copiedHistoryMsg, 2000);
         }
       }
+    }
+
+    wipeEl.onclick = () => {
+      this.clearHistory();
     }
   }
   
