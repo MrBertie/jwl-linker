@@ -1,7 +1,8 @@
 .jwl {
-  padding: 8px !important;
+  padding: 0px !important;
   .item {
-    padding: 8px;
+    font-size: var(--font-smaller);
+    padding: 8px 8px 8px 8px;
     &:hover {
       color: var(--text-normal);
       background: var(--background-modifier-active-hover);
@@ -10,6 +11,7 @@
     p {
       color: var(--text-muted); 
       display: -webkit-box;
+      /* biome-ignore lint: ; */
       box-orient: vertical;
       line-clamp: 5;
       -webkit-box-orient: vertical;
@@ -18,7 +20,8 @@
       margin: 0 0 4px 0;
     }
     p:not(:first-of-type) {
-      font-size: var(--font-smaller);
+      /* font-size: var(--font-smaller); */
+      padding-left: 4px;
     }
   }
 }
@@ -27,6 +30,7 @@ details {
   border-top: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
   font-size: var(--font-smaller);
+  margin-top:4px;
   padding: 6px 8px 8px 12px;
 }
 
