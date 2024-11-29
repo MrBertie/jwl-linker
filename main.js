@@ -65,7 +65,6 @@ const Config = {
 	jworgLinkRegex: /(\[([^\[\]]*)\]\()?(https[^\s\)]+jw\.org[^\s\)]{2,})(\))?/gim,
 	initialNumRegex: /^([\n\s]?)(\d{1,3}) /gim,
 	delay: 3000,
-	devMode: false, // 🛑
 };
 
 // All the available commands provided by the plugin
@@ -159,9 +158,7 @@ class JWLLinkerPlugin extends Plugin {
 		);
 	}
 
-	onunload() {
-		// this.app.workspace.detachLeavesOfType(JWL_LINKER_VIEW);
-	}
+	onunload() {}
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -173,15 +170,6 @@ class JWLLinkerPlugin extends Plugin {
 
 	async activateView() {
 		const { workspace } = this.app;
-
-		if (Config.devMode) {
-			// remove orphaned leaf caused by hot-reload
-			const emptyLeaf = workspace.getLeavesOfType('empty').first();
-			if (emptyLeaf) {
-				emptyLeaf.detach();
-			}
-		}
-
 		let leaf = workspace.getLeavesOfType(JWL_LINKER_VIEW).first();
 		if (!leaf) {
 			leaf = workspace.getRightLeaf(false); // false => no split
@@ -284,7 +272,7 @@ class JWLLinkerPlugin extends Plugin {
 	}
 
 	/**
-	 * Checks if there is an active editor, and attempts to return it
+	 * Check if there is an active editor, and attempt to return it
 	 * @param {Editor} editor
 	 * @returns {Editor}
 	 */
@@ -303,8 +291,8 @@ class JWLLinkerPlugin extends Plugin {
 	}
 
 	/**
-	 * Get a valid view reference even if deferred so that we can add to the history
-	 * Does not reveal as the user might be using a different leaf
+	 * Get a valid view reference even if deferred, so that we can add to the history
+	 * Does not reveal the leaf as the user might be using a different one
 	 * @returns {View|null}
 	 */
 	async getView() {
@@ -321,7 +309,7 @@ class JWLLinkerPlugin extends Plugin {
 	/**
 	 * Show the dropdown menu just below the caret
 	 * @param {Editor} editor
-	 * @param {Menu} menu 
+	 * @param {Menu} menu
 	 * @returns {void}
 	 */
 	showMenu(editor) {
@@ -343,7 +331,7 @@ class JWLLinkerPlugin extends Plugin {
 
 	/**
 	 * Prepare the dropdown menu. Each menu item calls its command counterpart
-	 * @param {*} submenu True if this menu is a submenu of a parent menu
+	 * @param {*} submenu submenu instance of a parent menu; if empty create new menu
 	 * @returns New menu ready to use
 	 */
 	buildMenu(submenu = undefined) {
@@ -361,8 +349,16 @@ class JWLLinkerPlugin extends Plugin {
 			menu.addSeparator();
 		}
 		for (const cmd of this.MenuItems) {
+			let titleEl;
+			if (cmd.id === Cmd.citeScriptureInline) {
+				const len = this.settings.inlineLength === 0 ? 'All' : `${this.settings.inlineLength}w`;
+				titleEl = createDiv({ text: cmd.text });
+				titleEl.createSpan({ text: len });
+			} else {
+				titleEl = cmd.text;
+			}
 			menu.addItem((item) => {
-				item.setTitle(cmd.text);
+				item.setTitle(titleEl);
 				item.setIcon(cmd.icon);
 				item.onClick(() => this.app.commands.executeCommandById(`${this.manifest.id}:${cmd.id}`));
 			});
@@ -1385,34 +1381,29 @@ class JWLLinkerSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('No. of words inline')
-			.setDesc(
-				'Limit inline snippet length to this many words (1-100).  Setting the value to zero (0) will fetch the entire verse.',
-			)
-			.addSlider((sld) => {
-				sld
-					.setDynamicTooltip()
-					.setLimits(0, 100, 1)
+			.setDesc('Limit inline snippet length to a fixed number of words.  Use 0 to fetch the entire verse(s).')
+			.addDropdown((drop) => {
+				drop
+					.addOptions(lengths)
 					.setValue(this.plugin.settings.inlineLength)
 					.onChange(async (value) => {
-						this.plugin.settings.inlineLength = value;
+						this.plugin.settings.inlineLength = Number(value);
 						await this.plugin.saveSettings();
-					})
-					.showTooltip();
+						this.plugin.menu = this.plugin.buildMenu();
+					});
 			});
 
 		new Setting(containerEl)
 			.setName('No. of history items')
-			.setDesc('How many history items to show in the sidebar (1-100).')
-			.addSlider((sld) => {
-				sld
-					.setDynamicTooltip()
-					.setLimits(1, 100, 1)
+			.setDesc('How many history items to show in the sidebar.')
+			.addDropdown((drop) => {
+				drop
+					.addOptions(lengths)
 					.setValue(this.plugin.settings.maxHistory)
 					.onChange(async (value) => {
-						this.plugin.settings.maxHistory = value;
+						this.plugin.settings.maxHistory = Number(value);
 						await this.plugin.saveSettings();
-					})
-					.showTooltip();
+					});
 			});
 
 		new Setting(containerEl)
@@ -1481,6 +1472,18 @@ const OutputError = {
 	invalidUrl: 'invalidUrl',
 	oneReferenceOnly: 'oneReferenceOnly',
 	onlineLookupFailed: 'onlineLookupFailed',
+};
+
+// Used by the inline and history length dropdowns in settings
+const lengths = {
+	0: '0',
+	10: 10,
+	20: 20,
+	30: 30,
+	40: 40,
+	50: 50,
+	75: 75,
+	100: 100,
 };
 
 const Bible = {
