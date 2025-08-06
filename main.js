@@ -223,7 +223,7 @@ class JWLLinkerPlugin extends Plugin {
   linkToJWLibrary(editor, command) {
     const activeEditor = this.confirmEditor(editor);
     if (!activeEditor) return;
-    const { selection, caret } = this._getEditorSelection(activeEditor);
+    const { selection } = this._getEditorSelection(activeEditor);
     if (selection) {
       let output;
       let changed;
@@ -231,15 +231,28 @@ class JWLLinkerPlugin extends Plugin {
         ({ output, changed } = this._convertScriptureToJWLibrary(selection, DisplayType.md));
       } else if (command === Cmd.convertWebToJWLibrary) {
         ({ output, changed } = this._convertWebToJWLibrary(selection));
-      } else if (command === Cmd.openScriptureInJWLibrary) {
-        ({ output, changed } = this._convertScriptureToJWLibrary(selection, DisplayType.url, caret));
       }
       if (changed) {
-        if (command === Cmd.openScriptureInJWLibrary) {
-          window.open(output);
-        } else {
-          activeEditor.replaceSelection(output);
-        }
+        activeEditor.replaceSelection(output);
+      }
+    } else {
+      new Notice(Lang.noSelection, Config.delay);
+    }
+  }
+
+  /**
+   * Open the scripture under the caret in JWLibrary
+   * Only in Editing/Preview mode
+   * @param {Editor} editor 
+   */
+  openInJWLibrary(editor) {
+    const activeEditor = this.confirmEditor(editor);
+    if (!activeEditor) return;
+    const { selection, caret } = this._getEditorSelection(activeEditor, false);
+    if (selection) {
+      const { output, changed } = this._convertScriptureToJWLibrary(selection, DisplayType.url, caret);
+      if (changed) {
+        window.open(output);
       }
     } else {
       new Notice(Lang.noSelection, Config.delay);
@@ -477,10 +490,10 @@ class JWLLinkerPlugin extends Plugin {
       fn: (editor) => this.linkToJWLibrary(editor, Cmd.convertWebToJWLibrary),
     },
     {
-      id: Cmd.opencriptureInJWLibrary,
+      id: Cmd.openScriptureInJWLibrary,
       text: 'Open scripture at caret in JW Library',
       icon: 'external-link',
-      fn: (editor) => this.linkToJWLibrary(editor, Cmd.openScriptureInJWLibrary),
+      fn: (editor) => this.openInJWLibrary(editor),
       sep: true,
     },
   ];
@@ -503,23 +516,28 @@ class JWLLinkerPlugin extends Plugin {
    * (2) sets selection to current line and returns it
    * Assumes an editor is active!
    * @param {Editor} editor
+   * @param {boolean} [setSelection=true] should we select the entire line in the editor?
    * @param {boolean} entireLine select and return entire line
    * @returns {{ string, number, number }} current selection, relative caret position, current line no.
    */
-  _getEditorSelection(editor, entireLine = false) {
+  _getEditorSelection(editor, setSelection = true, entireLine = false) {
     let selection;
     let caret;
     const cursor = editor.getCursor();
     const line = editor.getLine(cursor.line);
-    // either (1) current selection
     if (!entireLine && editor.somethingSelected()) {
-      selection = editor.getSelection();
+      // either (1) current selection
       // No caret position when user has explicitly selected a section of text/verse
       // caret = cursor.ch + line.indexOf(selection);
-      // or (2) current line (select entire line)
-    } else {
-      editor.setSelection({ line: cursor.line, ch: 0 }, { line: cursor.line, ch: line.length });
       selection = editor.getSelection();
+    } else {
+      // or (2) current line (select entire line)
+      const from = { line: cursor.line, ch: 0 };
+      const to = { line: cursor.line, ch: line.length };
+      selection = editor.getRange(from, to);
+      if (setSelection) {
+        editor.setSelection(from, to);
+      }
       caret = cursor.ch;
     }
     return { selection, caret, line: cursor.line };
@@ -543,7 +561,11 @@ class JWLLinkerPlugin extends Plugin {
   }
 
   /**
-   * Replaces all valid scripture references in input text with JW Library MD links []()
+   * Replaces ALL valid scripture references in input text with links
+   * Result depends on DisplayType:
+   * 1. JW Library MD links []()
+   * 2. Href links
+   * 3. Plain url
    * @param {string} input
    * @param {DisplayType} displayType
    * @return {{output: string, changed: boolean}}
@@ -586,7 +608,6 @@ class JWLLinkerPlugin extends Plugin {
     }
     return { output, changed };
   }
-  //https://www.jw.org/finder?srcid=jwlshare&wtlocale=E&prefer=lang&docid=1102025207&par=16
 
   /**
    * Provides a sanitized, formatted bible citation on the line below the scripture reference
