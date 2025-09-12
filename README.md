@@ -26,6 +26,8 @@ The plugin provides many new commands to work with scriptures, publication refer
 
 To access the commands:
 - On Desktop: right-click next to the scripture, and hover on *JWL Linker* to see the list of commands.
+![Menu](menu.png)
+  
 - On Mobile: add a toolbar item for the *JWL Linker* command.
 
 | Command                               | Mode | Target                          | Result                                                                                  | Replace target | 
